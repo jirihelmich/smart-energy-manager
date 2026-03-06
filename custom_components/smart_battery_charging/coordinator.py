@@ -611,6 +611,11 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self.notifier:
             return
 
+        # Skip when SOC sensor is unavailable (e.g. after HA restart,
+        # Modbus not yet connected → reads as 0%)
+        if not self.soc_sensor_available or soc <= 0:
+            return
+
         # Battery full: SOC >= 100%
         if soc >= 100:
             if not self._battery_full_notified:
