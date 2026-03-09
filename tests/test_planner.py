@@ -1350,3 +1350,121 @@ class TestForecastTomorrowSurplus:
 
         # Weekend has higher consumption → less surplus
         assert result.total_kwh < result_weekday.total_kwh
+
+
+class TestEvaluatePredictiveLoad:
+    """Test evaluate_predictive_load() for predictive surplus loads."""
+
+    def _make_predictive_load(self, power_kw=1.5, start=5, end=8):
+        from smart_battery_charging.models import SurplusLoadConfig
+        return SurplusLoadConfig(
+            name="Floor Heating",
+            switch_entity="switch.floor_heating",
+            power_kw=power_kw,
+            priority=2,
+            mode="predictive",
+            schedule_start_hour=start,
+            schedule_end_hour=end,
+        )
+
+    def _make_reactive_load(self, power_kw=2.3, priority=1):
+        from smart_battery_charging.models import SurplusLoadConfig
+        return SurplusLoadConfig(
+            name="Water Heater",
+            switch_entity="switch.water_heater",
+            power_kw=power_kw,
+            priority=priority,
+        )
+
+    def test_approved_with_good_solar(self):
+        """High SOC + good solar → approved."""
+        now = datetime(2026, 3, 9, 4, 30, 0)  # 4:30 AM, before schedule
+        coord = _make_coordinator(
+            current_soc=70.0,
+            solar_forecast_today=20.0,
+            solar_forecast_today_hourly={h: 2.5 for h in range(8, 16)},
+            consumption_history=[12.0, 12.0, 12.0],
+            actual_solar_today=0.0,
+        )
+        planner = ChargingPlanner(coord)
+        load = self._make_predictive_load(power_kw=1.5, start=5, end=8)
+
+        result = planner.evaluate_predictive_load(load, [], now=now)
+
+        assert result.approved is True
+        assert result.load_needs_kwh == 4.5  # 1.5 kW * 3 hours
+        assert result.min_soc_after > 20.0  # stays above min_soc
+
+    def test_denied_with_low_soc_and_poor_solar(self):
+        """Low SOC + poor solar → denied."""
+        now = datetime(2026, 3, 9, 4, 30, 0)
+        coord = _make_coordinator(
+            current_soc=25.0,
+            solar_forecast_today=3.0,
+            solar_forecast_today_hourly={h: 0.5 for h in range(10, 16)},
+            consumption_history=[16.0, 17.0, 16.5],
+            actual_solar_today=0.0,
+        )
+        planner = ChargingPlanner(coord)
+        load = self._make_predictive_load(power_kw=1.5, start=5, end=8)
+
+        result = planner.evaluate_predictive_load(load, [], now=now)
+
+        assert result.approved is False
+        assert result.min_soc_after < 20.0
+
+    def test_reactive_loads_claim_surplus_first(self):
+        """Reactive loads reduce available surplus budget."""
+        now = datetime(2026, 3, 9, 4, 30, 0)
+        coord = _make_coordinator(
+            current_soc=70.0,
+            solar_forecast_today=25.0,
+            solar_forecast_today_hourly={h: 3.0 for h in range(8, 16)},
+            consumption_history=[12.0, 12.0, 12.0],
+            actual_solar_today=0.0,
+        )
+        planner = ChargingPlanner(coord)
+        load = self._make_predictive_load(power_kw=1.5, start=5, end=8)
+        reactive = [self._make_reactive_load(power_kw=2.3)]
+
+        result = planner.evaluate_predictive_load(load, reactive, now=now)
+
+        # Reactive loads should claim some surplus
+        assert result.reactive_claim_kwh > 0
+        assert result.surplus_budget_kwh < result.surplus_budget_kwh + result.reactive_claim_kwh
+
+    def test_zero_power_load(self):
+        """Zero-power load needs 0 kWh, doesn't change approval outcome."""
+        now = datetime(2026, 3, 9, 4, 30, 0)
+        coord = _make_coordinator(
+            current_soc=70.0,
+            solar_forecast_today=20.0,
+            solar_forecast_today_hourly={h: 2.5 for h in range(8, 16)},
+            consumption_history=[12.0, 12.0, 12.0],
+            actual_solar_today=0.0,
+        )
+        planner = ChargingPlanner(coord)
+        load = self._make_predictive_load(power_kw=0.0, start=5, end=8)
+
+        result = planner.evaluate_predictive_load(load, [], now=now)
+
+        assert result.load_needs_kwh == 0.0
+        assert result.approved is True
+
+    def test_high_power_load_denied(self):
+        """Very high power load drains battery below min_soc."""
+        now = datetime(2026, 3, 9, 4, 30, 0)
+        coord = _make_coordinator(
+            current_soc=40.0,
+            solar_forecast_today=5.0,
+            solar_forecast_today_hourly={h: 0.8 for h in range(9, 15)},
+            consumption_history=[16.0, 17.0, 16.5],
+            actual_solar_today=0.0,
+        )
+        planner = ChargingPlanner(coord)
+        load = self._make_predictive_load(power_kw=5.0, start=5, end=8)
+
+        result = planner.evaluate_predictive_load(load, [], now=now)
+
+        assert result.approved is False
+        assert result.load_needs_kwh == 15.0  # 5 kW * 3 hours

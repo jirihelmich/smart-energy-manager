@@ -35,7 +35,7 @@ from .const import (
     DEFAULT_NOTIFY_SENSOR_UNAVAILABLE,
     DEFAULT_NOTIFY_SURPLUS_LOAD,
 )
-from .models import ChargingSchedule, ChargingSession, EnergyDeficit, OvernightNeed
+from .models import ChargingSchedule, ChargingSession, EnergyDeficit, OvernightNeed, PredictiveEvaluation
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -360,5 +360,28 @@ class ChargingNotifier:
         message = (
             f"Surplus: {surplus_kw:.1f} kW\n"
             f"Battery SOC: {soc:.0f}%"
+        )
+        await self._async_send(title, message)
+
+    async def async_notify_predictive_evaluation(
+        self,
+        load_name: str,
+        evaluation: PredictiveEvaluation,
+    ) -> None:
+        """Send notification when a predictive load is evaluated."""
+        if not self._is_enabled(
+            CONF_NOTIFY_SURPLUS_LOAD, DEFAULT_NOTIFY_SURPLUS_LOAD
+        ):
+            return
+
+        emoji = "✅" if evaluation.approved else "❌"
+        status = "Approved" if evaluation.approved else "Denied"
+        title = f"{emoji} Predictive: {load_name} {status}"
+        message = (
+            f"Load needs: {evaluation.load_needs_kwh:.1f} kWh\n"
+            f"Surplus budget: {evaluation.surplus_budget_kwh:.1f} kWh\n"
+            f"Reactive claim: {evaluation.reactive_claim_kwh:.1f} kWh\n"
+            f"Min SOC after: {evaluation.min_soc_after:.0f}%\n"
+            f"{evaluation.reason}"
         )
         await self._async_send(title, message)

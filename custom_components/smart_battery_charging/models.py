@@ -151,6 +151,11 @@ class SurplusLoadConfig:
     margin_on_kw: float = 0.3  # Extra surplus above power_kw to turn ON
     margin_off_kw: float = 0.5  # Deficit below 0 to turn OFF
     min_switch_interval: int = 300  # Seconds between switches (anti-flap)
+    # Predictive mode fields
+    mode: str = "reactive"  # "reactive" or "predictive"
+    schedule_start_hour: int = 5  # Hour to start the load (predictive only)
+    schedule_end_hour: int = 8  # Hour to stop the load (predictive only)
+    evaluation_lead_minutes: int = 30  # Minutes before schedule to evaluate
 
 
 @dataclass
@@ -161,3 +166,18 @@ class SurplusLoadState:
     last_switch_time: float = 0.0  # timestamp
     daily_runtime_seconds: float = 0.0  # today's accumulated runtime
     last_tick_time: float = 0.0  # for runtime accumulation
+    # Predictive mode state
+    predictive_approved: bool | None = None  # None=not evaluated, True/False
+    predictive_aborted: bool = False  # True if mid-run abort happened today
+
+
+@dataclass(frozen=True)
+class PredictiveEvaluation:
+    """Result of evaluating whether a predictive load should run."""
+
+    approved: bool
+    reason: str
+    surplus_budget_kwh: float  # Total surplus available for this load today
+    load_needs_kwh: float  # How much the load would consume
+    min_soc_after: float  # Projected min SOC % if load runs
+    reactive_claim_kwh: float  # Surplus claimed by higher-priority reactive loads

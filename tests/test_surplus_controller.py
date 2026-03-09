@@ -413,3 +413,168 @@ class TestMidnight:
         )
         # Runtime reset
         assert ctrl._states["switch.water_heater"].daily_runtime_seconds == 0.0
+
+    @pytest.mark.asyncio
+    async def test_midnight_resets_predictive_state(self):
+        """Midnight resets predictive approval for next day."""
+        load = {**FLOOR_HEATING_LOAD, "mode": "predictive", "schedule_start_hour": 5, "schedule_end_hour": 8}
+        hass = _make_hass(switch_states={"switch.floor_heating": "off"})
+        coord = _make_coordinator(surplus_loads=[load])
+        ctrl = SurplusLoadController(hass, coord)
+        ctrl.load_configs()
+        # Simulate that it was evaluated today
+        ctrl._states["switch.floor_heating"].predictive_approved = True
+        ctrl._states["switch.floor_heating"].predictive_aborted = True
+
+        await ctrl.async_on_midnight()
+
+        assert ctrl._states["switch.floor_heating"].predictive_approved is None
+        assert ctrl._states["switch.floor_heating"].predictive_aborted is False
+
+
+PREDICTIVE_FLOOR_HEATING = {
+    **FLOOR_HEATING_LOAD,
+    "mode": "predictive",
+    "schedule_start_hour": 5,
+    "schedule_end_hour": 8,
+    "evaluation_lead_minutes": 30,
+}
+
+
+class TestPredictiveLoadConfig:
+    """Test predictive load config parsing."""
+
+    def test_parse_predictive_fields(self):
+        coord = _make_coordinator(surplus_loads=[PREDICTIVE_FLOOR_HEATING])
+        configs = _load_configs_from_options(coord)
+        assert len(configs) == 1
+        assert configs[0].mode == "predictive"
+        assert configs[0].schedule_start_hour == 5
+        assert configs[0].schedule_end_hour == 8
+        assert configs[0].evaluation_lead_minutes == 30
+
+    def test_reactive_and_predictive_mixed(self):
+        coord = _make_coordinator(surplus_loads=[WATER_HEATER_LOAD, PREDICTIVE_FLOOR_HEATING])
+        ctrl = SurplusLoadController(_make_hass(), coord)
+        ctrl.load_configs()
+
+        assert len(ctrl._reactive_configs()) == 1
+        assert ctrl._reactive_configs()[0].name == "Water Heater"
+        assert len(ctrl._predictive_configs()) == 1
+        assert ctrl._predictive_configs()[0].name == "Floor Heating"
+
+
+class TestPredictiveTick:
+    """Test predictive load tick behavior."""
+
+    def _make_dt_util_mock(self, hour, minute=0):
+        """Create a mock for _get_now that returns specific time."""
+        from datetime import datetime
+        return datetime(2026, 3, 9, hour, minute, 0)
+
+    @pytest.mark.asyncio
+    async def test_predictive_turn_on_at_schedule_start(self):
+        """Approved predictive load turns on when schedule starts."""
+        hass = _make_hass(
+            grid_export_kw=0.0,
+            switch_states={"switch.floor_heating": "off"},
+        )
+        coord = _make_coordinator(soc=70.0, surplus_loads=[PREDICTIVE_FLOOR_HEATING])
+        coord.planner = None  # No planner means no evaluation — set approved manually
+        ctrl = SurplusLoadController(hass, coord)
+        ctrl.load_configs()
+        ctrl._states["switch.floor_heating"].predictive_approved = True
+        ctrl._get_now = lambda: self._make_dt_util_mock(5, 0)
+
+        await ctrl.async_on_tick()
+
+        # Should turn on the predictive load
+        calls = [c for c in hass.services.async_call.call_args_list
+                 if c[0][1] == "turn_on" and c[0][2]["entity_id"] == "switch.floor_heating"]
+        assert len(calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_predictive_not_turned_on_if_not_approved(self):
+        """Predictive load stays off if not approved."""
+        hass = _make_hass(
+            grid_export_kw=0.0,
+            switch_states={"switch.floor_heating": "off"},
+        )
+        coord = _make_coordinator(soc=70.0, surplus_loads=[PREDICTIVE_FLOOR_HEATING])
+        coord.planner = None
+        ctrl = SurplusLoadController(hass, coord)
+        ctrl.load_configs()
+        ctrl._states["switch.floor_heating"].predictive_approved = False
+        ctrl._get_now = lambda: self._make_dt_util_mock(5, 0)
+
+        await ctrl.async_on_tick()
+
+        # Should NOT turn on
+        calls = [c for c in hass.services.async_call.call_args_list
+                 if c[0][2].get("entity_id") == "switch.floor_heating"]
+        assert len(calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_predictive_turn_off_at_schedule_end(self):
+        """Running predictive load turns off when schedule ends."""
+        hass = _make_hass(
+            grid_export_kw=0.0,
+            switch_states={"switch.floor_heating": "on"},
+        )
+        coord = _make_coordinator(soc=50.0, surplus_loads=[PREDICTIVE_FLOOR_HEATING])
+        coord.planner = None
+        ctrl = SurplusLoadController(hass, coord)
+        ctrl.load_configs()
+        ctrl._states["switch.floor_heating"].predictive_approved = True
+        ctrl._get_now = lambda: self._make_dt_util_mock(8, 0)  # At schedule end
+
+        await ctrl.async_on_tick()
+
+        # Should turn off
+        calls = [c for c in hass.services.async_call.call_args_list
+                 if c[0][1] == "turn_off" and c[0][2]["entity_id"] == "switch.floor_heating"]
+        assert len(calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_predictive_does_not_affect_reactive(self):
+        """Reactive loads still work normally alongside predictive loads."""
+        hass = _make_hass(
+            grid_export_kw=3.0,
+            switch_states={"switch.water_heater": "off", "switch.floor_heating": "off"},
+        )
+        coord = _make_coordinator(
+            soc=99.0,
+            surplus_loads=[WATER_HEATER_LOAD, PREDICTIVE_FLOOR_HEATING],
+        )
+        coord.planner = None
+        ctrl = SurplusLoadController(hass, coord)
+        ctrl.load_configs()
+        ctrl._states["switch.floor_heating"].predictive_approved = False  # Denied
+        ctrl._get_now = lambda: self._make_dt_util_mock(10, 0)
+
+        await ctrl.async_on_tick()
+
+        # Water heater (reactive) should turn on, floor heating (predictive) should not
+        calls = hass.services.async_call.call_args_list
+        on_calls = [c for c in calls if c[0][1] == "turn_on"]
+        assert len(on_calls) == 1
+        assert on_calls[0][0][2]["entity_id"] == "switch.water_heater"
+
+
+class TestSensorDataPredictive:
+    """Test sensor data includes predictive info."""
+
+    def test_load_details_include_predictive_fields(self):
+        hass = _make_hass(switch_states={"switch.floor_heating": "off"})
+        coord = _make_coordinator(surplus_loads=[PREDICTIVE_FLOOR_HEATING])
+        ctrl = SurplusLoadController(hass, coord)
+        ctrl.load_configs()
+        ctrl._states["switch.floor_heating"].predictive_approved = True
+
+        data = ctrl.get_sensor_data()
+        details = data["surplus_load_details"]
+        assert len(details) == 1
+        assert details[0]["mode"] == "predictive"
+        assert details[0]["schedule"] == "05:00-08:00"
+        assert details[0]["approved"] is True
+        assert details[0]["aborted"] is False

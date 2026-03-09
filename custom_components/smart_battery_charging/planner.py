@@ -14,7 +14,15 @@ from .const import (
     EMERGENCY_SOC_THRESHOLD,
     PV_FALLBACK_BUFFER_HOURS,
 )
-from .models import ChargingSchedule, EnergyDeficit, OvernightNeed, SurplusForecast, TrajectoryResult
+from .models import (
+    ChargingSchedule,
+    EnergyDeficit,
+    OvernightNeed,
+    PredictiveEvaluation,
+    SurplusForecast,
+    SurplusLoadConfig,
+    TrajectoryResult,
+)
 
 if TYPE_CHECKING:
     from .coordinator import SmartBatteryCoordinator
@@ -496,6 +504,106 @@ class ChargingPlanner:
             battery_full_hour=battery_full_hour,
             peak_surplus_kw=round(peak_surplus, 2),
             surplus_hours=len(hourly_surplus),
+        )
+
+    def evaluate_predictive_load(
+        self,
+        load: SurplusLoadConfig,
+        reactive_loads: list[SurplusLoadConfig],
+        *,
+        now: datetime | None = None,
+    ) -> PredictiveEvaluation:
+        """Evaluate whether a predictive load should run today.
+
+        Simulates today's SOC trajectory with:
+        1. Solar production filling the battery
+        2. Higher-priority reactive loads claiming surplus first
+        3. The predictive load draining the battery during its schedule
+        4. Remaining surplus recharging the battery
+
+        Approved if SOC never drops below min_soc during or after the load runs.
+        """
+        if now is None:
+            now = _default_now()
+        c = self._coordinator
+
+        daily_consumption = c.consumption_tracker.average(c.store.consumption_history)
+        if now.weekday() >= 5:
+            daily_consumption *= c.weekend_consumption_multiplier
+
+        capacity = c.battery_capacity
+        min_soc_kwh = capacity * c.min_soc / 100
+        max_soc_kwh = capacity * c.max_charge_level / 100
+        soc_kwh = capacity * c.current_soc / 100
+
+        solar_profile, _ = self._build_solar_profile(now)
+
+        # Predictive load schedule
+        sched_start = load.schedule_start_hour
+        sched_end = load.schedule_end_hour
+        schedule_hours = sched_end - sched_start
+        if schedule_hours <= 0:
+            schedule_hours += 24  # wrap around midnight
+
+        load_needs_kwh = load.power_kw * schedule_hours
+
+        # Simulate from now through end of today
+        min_soc_reached = soc_kwh
+        reactive_claim_total = 0.0
+        total_surplus = 0.0
+
+        for hour in range(now.hour, 24):
+            cons = self._hourly_consumption(hour, daily_consumption)
+            solar = solar_profile.get((0, hour), 0.0)
+
+            soc_kwh += solar - cons
+
+            # Predictive load drains battery during its schedule
+            if sched_start <= hour < sched_end:
+                soc_kwh -= load.power_kw
+
+            # Battery overflow = surplus available for reactive loads
+            if soc_kwh > max_soc_kwh:
+                overflow = soc_kwh - max_soc_kwh
+                soc_kwh = max_soc_kwh
+
+                # Reactive loads claim surplus by priority
+                remaining = overflow
+                for rl in sorted(reactive_loads, key=lambda x: x.priority):
+                    claim = min(remaining, rl.power_kw)
+                    reactive_claim_total += claim
+                    remaining -= claim
+                    if remaining <= 0:
+                        break
+                total_surplus += overflow
+            else:
+                soc_kwh = max(0.0, soc_kwh)
+
+            if soc_kwh < min_soc_reached:
+                min_soc_reached = soc_kwh
+
+        min_soc_pct = round(min_soc_reached / capacity * 100, 1)
+        surplus_budget = max(0.0, total_surplus - reactive_claim_total)
+
+        approved = min_soc_reached >= min_soc_kwh
+        if approved:
+            reason = (
+                f"Approved: surplus {surplus_budget:.1f} kWh, "
+                f"min SOC {min_soc_pct:.0f}% stays above {c.min_soc:.0f}%"
+            )
+        else:
+            reason = (
+                f"Denied: min SOC would drop to {min_soc_pct:.0f}% "
+                f"(below {c.min_soc:.0f}%)"
+            )
+
+        return PredictiveEvaluation(
+            approved=approved,
+            reason=reason,
+            surplus_budget_kwh=round(surplus_budget, 2),
+            load_needs_kwh=round(load_needs_kwh, 2),
+            min_soc_after=min_soc_pct,
+            reactive_claim_kwh=round(reactive_claim_total, 2),
         )
 
     def forecast_tomorrow_surplus(self, *, now: datetime | None = None) -> SurplusForecast:

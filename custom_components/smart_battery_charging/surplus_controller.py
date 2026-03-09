@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import HomeAssistant
@@ -18,15 +19,19 @@ from .const import (
     CONF_GRID_EXPORT_POWER_SENSOR,
     CONF_NOTIFY_SURPLUS_LOAD,
     CONF_SURPLUS_LOADS,
+    DEFAULT_PREDICTIVE_LEAD_MINUTES,
+    DEFAULT_PREDICTIVE_SCHEDULE_END,
+    DEFAULT_PREDICTIVE_SCHEDULE_START,
     DEFAULT_NOTIFY_SURPLUS_LOAD,
     DEFAULT_SURPLUS_BATTERY_OFF,
     DEFAULT_SURPLUS_BATTERY_ON,
     DEFAULT_SURPLUS_MARGIN_OFF,
     DEFAULT_SURPLUS_MARGIN_ON,
     DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL,
+    SURPLUS_MODE_PREDICTIVE,
     SURPLUS_RUNTIME_HISTORY_DAYS,
 )
-from .models import SurplusLoadConfig, SurplusLoadState
+from .models import PredictiveEvaluation, SurplusLoadConfig, SurplusLoadState
 
 if TYPE_CHECKING:
     from .coordinator import SmartBatteryCoordinator
@@ -55,6 +60,10 @@ def _load_configs_from_options(coordinator: SmartBatteryCoordinator) -> list[Sur
                 margin_on_kw=float(item.get("margin_on_kw", DEFAULT_SURPLUS_MARGIN_ON)),
                 margin_off_kw=float(item.get("margin_off_kw", DEFAULT_SURPLUS_MARGIN_OFF)),
                 min_switch_interval=int(item.get("min_switch_interval", DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL)),
+                mode=str(item.get("mode", "reactive")),
+                schedule_start_hour=int(item.get("schedule_start_hour", DEFAULT_PREDICTIVE_SCHEDULE_START)),
+                schedule_end_hour=int(item.get("schedule_end_hour", DEFAULT_PREDICTIVE_SCHEDULE_END)),
+                evaluation_lead_minutes=int(item.get("evaluation_lead_minutes", DEFAULT_PREDICTIVE_LEAD_MINUTES)),
             ))
         except (KeyError, ValueError, TypeError):
             _LOGGER.warning("Invalid surplus load config: %s", item)
@@ -143,6 +152,177 @@ class SurplusLoadController:
         )
         return grid_export_kw + running_power
 
+    def _get_now(self) -> datetime:
+        """Get current time (for testability)."""
+        try:
+            from homeassistant.util import dt as dt_util
+            return dt_util.now()
+        except Exception:
+            return datetime.now()
+
+    def _reactive_configs(self) -> list[SurplusLoadConfig]:
+        """Get reactive-mode configs."""
+        return [c for c in self._configs if c.mode != SURPLUS_MODE_PREDICTIVE]
+
+    def _predictive_configs(self) -> list[SurplusLoadConfig]:
+        """Get predictive-mode configs."""
+        return [c for c in self._configs if c.mode == SURPLUS_MODE_PREDICTIVE]
+
+    async def _evaluate_predictive_loads(self, now: datetime) -> None:
+        """Evaluate predictive loads before their schedule starts.
+
+        Runs at evaluation_lead_minutes before schedule_start_hour.
+        Uses planner.evaluate_predictive_load() to simulate SOC trajectory.
+        """
+        planner = self._coordinator.planner
+        if planner is None:
+            return
+
+        reactive = self._reactive_configs()
+
+        for cfg in self._predictive_configs():
+            st = self._states[cfg.switch_entity]
+
+            # Skip if already evaluated today or aborted
+            if st.predictive_approved is not None or st.predictive_aborted:
+                continue
+
+            # Check if we're within the evaluation window
+            eval_hour = cfg.schedule_start_hour
+            eval_minute = 60 - cfg.evaluation_lead_minutes
+            if eval_minute < 0:
+                eval_hour -= 1
+                eval_minute += 60
+
+            # Are we at or past evaluation time but before schedule start?
+            current_minutes = now.hour * 60 + now.minute
+            eval_minutes = eval_hour * 60 + eval_minute
+            start_minutes = cfg.schedule_start_hour * 60
+
+            if not (eval_minutes <= current_minutes < start_minutes):
+                continue
+
+            _LOGGER.info(
+                "Evaluating predictive load '%s' (schedule %02d:00-%02d:00)",
+                cfg.name, cfg.schedule_start_hour, cfg.schedule_end_hour,
+            )
+
+            try:
+                evaluation = planner.evaluate_predictive_load(
+                    cfg, reactive, now=now
+                )
+            except Exception:
+                _LOGGER.exception("Failed to evaluate predictive load '%s'", cfg.name)
+                st.predictive_approved = False
+                continue
+
+            st.predictive_approved = evaluation.approved
+            _LOGGER.info(
+                "Predictive '%s': %s — %s",
+                cfg.name,
+                "APPROVED" if evaluation.approved else "DENIED",
+                evaluation.reason,
+            )
+
+            # Notify
+            if self._notifier and self._coordinator._opt(
+                CONF_NOTIFY_SURPLUS_LOAD, DEFAULT_NOTIFY_SURPLUS_LOAD
+            ):
+                await self._notifier.async_notify_predictive_evaluation(
+                    cfg.name, evaluation
+                )
+
+    async def _tick_predictive_loads(self, now: datetime, monotonic_now: float) -> None:
+        """Handle predictive loads during their schedule.
+
+        Turns on at schedule_start, off at schedule_end.
+        Re-evaluates mid-run: aborts if SOC projection drops below min_soc.
+        """
+        planner = self._coordinator.planner
+        soc = self._coordinator.current_soc
+
+        for cfg in self._predictive_configs():
+            st = self._states[cfg.switch_entity]
+            current_hour = now.hour
+
+            in_schedule = cfg.schedule_start_hour <= current_hour < cfg.schedule_end_hour
+
+            if in_schedule and st.predictive_approved and not st.predictive_aborted:
+                if not st.is_running:
+                    # Turn on at schedule start
+                    try:
+                        domain = cfg.switch_entity.split(".")[0]
+                        await self._hass.services.async_call(
+                            domain, "turn_on", {"entity_id": cfg.switch_entity}
+                        )
+                        st.is_running = True
+                        st.last_switch_time = monotonic_now
+                        _LOGGER.info(
+                            "Predictive: %s turn on (schedule %02d:00-%02d:00, SOC=%.0f%%)",
+                            cfg.name, cfg.schedule_start_hour, cfg.schedule_end_hour, soc,
+                        )
+                        if self._notifier and self._coordinator._opt(
+                            CONF_NOTIFY_SURPLUS_LOAD, DEFAULT_NOTIFY_SURPLUS_LOAD
+                        ):
+                            await self._notifier.async_notify_surplus_load(
+                                cfg.name, True, 0.0, soc
+                            )
+                    except Exception:
+                        _LOGGER.exception("Failed to turn on predictive load %s", cfg.name)
+                else:
+                    # Mid-run re-evaluation: abort if SOC trajectory goes below min_soc
+                    if planner is not None:
+                        try:
+                            reactive = self._reactive_configs()
+                            evaluation = planner.evaluate_predictive_load(
+                                cfg, reactive, now=now
+                            )
+                            if not evaluation.approved:
+                                _LOGGER.warning(
+                                    "Predictive '%s': aborting mid-run — %s",
+                                    cfg.name, evaluation.reason,
+                                )
+                                st.predictive_aborted = True
+                                try:
+                                    domain = cfg.switch_entity.split(".")[0]
+                                    await self._hass.services.async_call(
+                                        domain, "turn_off", {"entity_id": cfg.switch_entity}
+                                    )
+                                    st.is_running = False
+                                    st.last_switch_time = monotonic_now
+                                    if self._notifier and self._coordinator._opt(
+                                        CONF_NOTIFY_SURPLUS_LOAD, DEFAULT_NOTIFY_SURPLUS_LOAD
+                                    ):
+                                        await self._notifier.async_notify_surplus_load(
+                                            cfg.name, False, 0.0, soc
+                                        )
+                                except Exception:
+                                    _LOGGER.exception("Failed to abort predictive load %s", cfg.name)
+                        except Exception:
+                            _LOGGER.debug("Mid-run evaluation failed for %s", cfg.name)
+
+            elif not in_schedule and st.is_running and cfg.mode == SURPLUS_MODE_PREDICTIVE:
+                # Schedule ended — turn off
+                try:
+                    domain = cfg.switch_entity.split(".")[0]
+                    await self._hass.services.async_call(
+                        domain, "turn_off", {"entity_id": cfg.switch_entity}
+                    )
+                    st.is_running = False
+                    st.last_switch_time = monotonic_now
+                    _LOGGER.info(
+                        "Predictive: %s turn off (schedule ended, SOC=%.0f%%)",
+                        cfg.name, soc,
+                    )
+                    if self._notifier and self._coordinator._opt(
+                        CONF_NOTIFY_SURPLUS_LOAD, DEFAULT_NOTIFY_SURPLUS_LOAD
+                    ):
+                        await self._notifier.async_notify_surplus_load(
+                            cfg.name, False, 0.0, soc
+                        )
+                except Exception:
+                    _LOGGER.exception("Failed to turn off predictive load %s", cfg.name)
+
     async def async_on_tick(self) -> None:
         """Main tick — evaluate all loads and switch as needed.
 
@@ -151,7 +331,8 @@ class SurplusLoadController:
         if not self._configs:
             return
 
-        now = time.monotonic()
+        monotonic_now = time.monotonic()
+        now = self._get_now()
 
         # Sync with actual HA switch states
         self._sync_actual_switch_states()
@@ -160,10 +341,19 @@ class SurplusLoadController:
         for cfg in self._configs:
             st = self._states[cfg.switch_entity]
             if st.is_running and st.last_tick_time > 0:
-                elapsed = now - st.last_tick_time
+                elapsed = monotonic_now - st.last_tick_time
                 if 0 < elapsed < 600:  # Sanity: max 10 min per tick
                     st.daily_runtime_seconds += elapsed
-            st.last_tick_time = now
+            st.last_tick_time = monotonic_now
+
+        # --- Predictive loads: evaluate and manage schedule ---
+        await self._evaluate_predictive_loads(now)
+        await self._tick_predictive_loads(now, monotonic_now)
+
+        # --- Reactive loads: surplus-based switching ---
+        reactive_configs = self._reactive_configs()
+        if not reactive_configs:
+            return
 
         # Get grid export power
         grid_export = self._get_grid_export_power()
@@ -180,16 +370,12 @@ class SurplusLoadController:
             grid_export, true_surplus, soc,
         )
 
-        # Evaluate loads by priority (lowest number = highest priority)
-        # Turn ON: iterate low→high priority (turn on most important first)
-        # Turn OFF: iterate high→low priority (turn off least important first)
-
         # Remaining surplus available for allocation
         available_surplus = true_surplus
 
-        # Phase 1: Decide what should be ON/OFF
+        # Phase 1: Decide what should be ON/OFF (reactive loads only)
         desired: dict[str, bool] = {}
-        for cfg in self._configs:  # sorted by priority (low first)
+        for cfg in reactive_configs:  # sorted by priority (low first)
             st = self._states[cfg.switch_entity]
 
             if st.is_running:
@@ -216,7 +402,7 @@ class SurplusLoadController:
                     desired[cfg.switch_entity] = False
 
         # Phase 2: Execute switches (with anti-flap)
-        for cfg in self._configs:
+        for cfg in reactive_configs:
             st = self._states[cfg.switch_entity]
             want_on = desired.get(cfg.switch_entity, False)
 
@@ -225,7 +411,7 @@ class SurplusLoadController:
 
             # Anti-flap: check minimum switch interval
             if st.last_switch_time > 0:
-                elapsed = now - st.last_switch_time
+                elapsed = monotonic_now - st.last_switch_time
                 if elapsed < cfg.min_switch_interval:
                     _LOGGER.debug(
                         "Anti-flap: %s switch blocked (%.0fs < %ds)",
@@ -241,7 +427,7 @@ class SurplusLoadController:
                     domain, action, {"entity_id": cfg.switch_entity}
                 )
                 st.is_running = want_on
-                st.last_switch_time = now
+                st.last_switch_time = monotonic_now
                 _LOGGER.info(
                     "Surplus: %s %s (surplus=%.2f kW, SOC=%.0f%%)",
                     cfg.name, action.replace("_", " "), true_surplus, soc,
@@ -258,13 +444,16 @@ class SurplusLoadController:
                 _LOGGER.exception("Failed to %s %s", action, cfg.switch_entity)
 
     async def async_on_midnight(self) -> None:
-        """Reset daily runtime counters and persist history."""
+        """Reset daily runtime counters, predictive state, and persist history."""
         runtime_data: dict[str, float] = {}
         for cfg in self._configs:
             st = self._states[cfg.switch_entity]
             if st.daily_runtime_seconds > 0:
                 runtime_data[cfg.name] = round(st.daily_runtime_seconds / 3600, 2)
             st.daily_runtime_seconds = 0.0
+            # Reset predictive state for tomorrow
+            st.predictive_approved = None
+            st.predictive_aborted = False
 
         if runtime_data:
             await self._coordinator.async_record_surplus_runtime(runtime_data)
@@ -290,14 +479,20 @@ class SurplusLoadController:
             st = self._states.get(cfg.switch_entity, SurplusLoadState())
             if st.is_running:
                 active_loads.append(cfg.name)
-            load_details.append({
+            detail: dict[str, Any] = {
                 "name": cfg.name,
                 "entity": cfg.switch_entity,
                 "power_kw": cfg.power_kw,
                 "priority": cfg.priority,
                 "is_running": st.is_running,
                 "runtime_today_h": round(st.daily_runtime_seconds / 3600, 2),
-            })
+                "mode": cfg.mode,
+            }
+            if cfg.mode == SURPLUS_MODE_PREDICTIVE:
+                detail["schedule"] = f"{cfg.schedule_start_hour:02d}:00-{cfg.schedule_end_hour:02d}:00"
+                detail["approved"] = st.predictive_approved
+                detail["aborted"] = st.predictive_aborted
+            load_details.append(detail)
 
         total_surplus_power = sum(
             cfg.power_kw for cfg in self._configs

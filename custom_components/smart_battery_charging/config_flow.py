@@ -92,6 +92,11 @@ from .const import (
     DEFAULT_SURPLUS_MARGIN_OFF,
     DEFAULT_SURPLUS_MARGIN_ON,
     DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL,
+    DEFAULT_PREDICTIVE_LEAD_MINUTES,
+    DEFAULT_PREDICTIVE_SCHEDULE_END,
+    DEFAULT_PREDICTIVE_SCHEDULE_START,
+    SURPLUS_MODE_PREDICTIVE,
+    SURPLUS_MODE_REACTIVE,
     DEFAULT_WEEKEND_CONSUMPTION_MULTIPLIER,
     DEFAULT_WINDOW_END_HOUR,
     DEFAULT_WINDOW_START_HOUR,
@@ -471,6 +476,8 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
         self._config_entry = config_entry
         # Working copy of options — accumulated across sub-steps
         self._options: dict[str, Any] = {}
+        # Temporary storage for multi-step surplus_add
+        self._pending_load: dict[str, Any] = {}
 
     def _current(self) -> dict[str, Any]:
         """Merged data + options for reading current values."""
@@ -666,24 +673,25 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
     async def async_step_surplus_add(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Add a new surplus load."""
+        """Add a new surplus load — basic config."""
         if user_input is not None:
-            loads = self._get_surplus_loads()
-            loads.append({
+            self._pending_load = {
                 "name": user_input["name"],
                 "switch_entity": user_input["switch_entity"],
                 "power_kw": user_input["power_kw"],
-                "priority": user_input.get("priority", len(loads) + 1),
+                "priority": user_input.get("priority", len(self._get_surplus_loads()) + 1),
+                "mode": user_input.get("mode", SURPLUS_MODE_REACTIVE),
                 "battery_on_threshold": user_input.get("battery_on_threshold", DEFAULT_SURPLUS_BATTERY_ON),
                 "battery_off_threshold": user_input.get("battery_off_threshold", DEFAULT_SURPLUS_BATTERY_OFF),
                 "margin_on_kw": user_input.get("margin_on_kw", DEFAULT_SURPLUS_MARGIN_ON),
                 "margin_off_kw": user_input.get("margin_off_kw", DEFAULT_SURPLUS_MARGIN_OFF),
                 "min_switch_interval": user_input.get("min_switch_interval", DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL),
-            })
-            self._options[CONF_SURPLUS_LOADS] = loads
-            return self.async_create_entry(
-                title="", data={**self._config_entry.options, **self._options}
-            )
+            }
+            # If predictive mode, show schedule step
+            if self._pending_load["mode"] == SURPLUS_MODE_PREDICTIVE:
+                return await self.async_step_surplus_add_predictive()
+            # Reactive mode — save immediately
+            return self._save_pending_load()
 
         loads = self._get_surplus_loads()
         next_priority = len(loads) + 1
@@ -699,6 +707,9 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                     ),
                     vol.Optional("priority", default=next_priority): vol.All(
                         vol.Coerce(int), vol.Range(min=1, max=10)
+                    ),
+                    vol.Optional("mode", default=SURPLUS_MODE_REACTIVE): _select_selector(
+                        [SURPLUS_MODE_REACTIVE, SURPLUS_MODE_PREDICTIVE]
                     ),
                     vol.Optional(
                         "battery_on_threshold", default=DEFAULT_SURPLUS_BATTERY_ON
@@ -717,6 +728,44 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                     ): vol.All(vol.Coerce(int), vol.Range(min=60, max=3600)),
                 }
             ),
+        )
+
+    async def async_step_surplus_add_predictive(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Configure schedule for a predictive surplus load."""
+        if user_input is not None:
+            self._pending_load["schedule_start_hour"] = user_input["schedule_start_hour"]
+            self._pending_load["schedule_end_hour"] = user_input["schedule_end_hour"]
+            self._pending_load["evaluation_lead_minutes"] = user_input.get(
+                "evaluation_lead_minutes", DEFAULT_PREDICTIVE_LEAD_MINUTES
+            )
+            return self._save_pending_load()
+
+        return self.async_show_form(
+            step_id="surplus_add_predictive",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        "schedule_start_hour", default=DEFAULT_PREDICTIVE_SCHEDULE_START
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
+                    vol.Required(
+                        "schedule_end_hour", default=DEFAULT_PREDICTIVE_SCHEDULE_END
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
+                    vol.Optional(
+                        "evaluation_lead_minutes", default=DEFAULT_PREDICTIVE_LEAD_MINUTES
+                    ): vol.All(vol.Coerce(int), vol.Range(min=5, max=120)),
+                }
+            ),
+        )
+
+    def _save_pending_load(self) -> FlowResult:
+        """Save the pending load to options."""
+        loads = self._get_surplus_loads()
+        loads.append(self._pending_load)
+        self._options[CONF_SURPLUS_LOADS] = loads
+        return self.async_create_entry(
+            title="", data={**self._config_entry.options, **self._options}
         )
 
     async def async_step_surplus_remove(

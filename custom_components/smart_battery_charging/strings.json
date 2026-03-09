@@ -154,11 +154,21 @@
           "switch_entity": "Switch entity",
           "power_kw": "Power draw (kW)",
           "priority": "Priority (1 = highest)",
+          "mode": "Mode (reactive = surplus-triggered, predictive = scheduled with forecast)",
           "battery_on_threshold": "Battery SOC to enable (%)",
           "battery_off_threshold": "Battery SOC to disable (%)",
           "margin_on_kw": "Extra surplus to turn ON (kW)",
           "margin_off_kw": "Deficit margin to turn OFF (kW)",
           "min_switch_interval": "Min switch interval (seconds)"
+        }
+      },
+      "surplus_add_predictive": {
+        "title": "Predictive Load Schedule",
+        "description": "Set the daily schedule for this load. It will run during these hours if the solar forecast shows enough surplus to recharge the battery afterwards.",
+        "data": {
+          "schedule_start_hour": "Schedule start hour",
+          "schedule_end_hour": "Schedule end hour",
+          "evaluation_lead_minutes": "Evaluate minutes before start"
         }
       },
       "surplus_remove": {
