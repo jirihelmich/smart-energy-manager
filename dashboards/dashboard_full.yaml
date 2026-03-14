@@ -31,6 +31,7 @@ views:
             entity: sensor.current_spot_electricity_price
             needle: true
             gradient: true
+            round: full
             min: -1
             max: 8
             titles:
@@ -70,6 +71,7 @@ views:
             entity2: sensor.smart_energy_manager_battery_usable_charge
             needle: true
             gradient: true
+            round: full
             min: 0
             max: 100
             titles:
@@ -79,6 +81,7 @@ views:
               min: 0
               max: 15
               mode: severity
+              round: full
               segments:
                 - from: 0
                   color: '#e53935'
@@ -898,6 +901,7 @@ views:
             entity: sensor.smart_energy_manager_self_consumption_ratio
             needle: true
             gradient: true
+            round: full
             min: 0
             max: 100
             titles:
@@ -920,6 +924,7 @@ views:
             entity: sensor.smart_energy_manager_grid_dependency
             needle: true
             gradient: true
+            round: full
             min: 0
             max: 100
             titles:

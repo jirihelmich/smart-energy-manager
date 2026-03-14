@@ -15,6 +15,7 @@ A Home Assistant custom integration for smart energy management of solar+battery
 - SOC trajectory simulation — hour-by-hour forward simulation for precise charge decisions
 - Cheapest price window selection within configurable night hours
 - Solar forecast integration with error correction (7-day sliding window)
+- Baseline consumption tracking — automatically subtracts surplus load energy from average to prevent feedback loops
 - Consumption tracking with sliding window average (7-day, 3-period day model)
 - Price threshold with emergency low-battery override (SOC < 25%)
 - Charging state persists across HA restarts
@@ -27,8 +28,16 @@ A Home Assistant custom integration for smart energy management of solar+battery
 - Per-load SOC thresholds, power margins, anti-flap protection
 - Outdoor temperature gating — skip loads when it's warm enough outside
 - Predictive evaluation checks impact on reactive loads (won't starve lower-priority loads)
-- Surplus forecasting (today + tomorrow after sunset)
+- Surplus forecasting (today + tomorrow after sunset) with visual bars on dashboard
 - Runtime tracking, energy metering, utilization efficiency
+
+### Dashboard
+- Included Lovelace dashboard with 4 views: Scheduled Charging, Data, Analytics, Surplus
+- [gauge-card-pro](https://github.com/benjamin-dcs/gauge-card-pro) gauges with rounded ends, gradients, setpoint needles, and min/max indicators
+- Dual battery gauge: SOC (outer) + usable charge in kWh (inner)
+- Electricity price gauge: current price needle, max charge price setpoint, cheapest/most expensive today markers
+- Surplus forecast: visual bars showing solar forecast, baseline consumption, and expected surplus
+- ApexCharts for price history, power draw, and energy consumption
 
 ### General
 - Multi-step config flow with inverter templates for easy setup
@@ -119,6 +128,111 @@ Configure via Settings > Devices > Smart Energy Manager > Configure > Surplus Lo
 | Entity | Description |
 |--------|-------------|
 | Enabled | Master on/off |
+
+## Example Use Cases
+
+Real-world examples from a Czech household with a Solax G4 inverter, 15 kWh battery, and 8 kWp dual-orientation solar panels.
+
+### Water Heater (Reactive)
+
+A dual-tank water heater (2.2 kW) controlled by a Shelly smart relay. Runs only when the battery is nearly full and solar is being exported to the grid.
+
+**Setup:**
+- **Switch entity**: `switch.water_heater` (Shelly relay)
+- **Power sensor**: `sensor.water_heater_power` (Shelly energy meter)
+- **Mode**: Reactive
+- **Power**: 2.2 kW
+- **Priority**: 1 (highest — gets surplus first)
+- **SOC ON threshold**: 90% (battery must be nearly full)
+- **SOC OFF threshold**: 85% (hysteresis — don't flap on small SOC drops)
+- **Margin ON**: 0.3 kW (turn on when grid export exceeds 0.3 kW)
+- **Margin OFF**: -0.2 kW (turn off when importing more than 0.2 kW)
+- **Min switch interval**: 1800s (avoid relay wear on cloudy days)
+
+**Why it works:** The water heater is a perfect surplus load — it's a thermal battery. The Shelly relay has a built-in power meter, so the integration tracks actual energy consumed. With a 90% SOC threshold, it only runs when the battery is basically full and surplus would otherwise be exported.
+
+### Floor Heating Upstairs (Predictive)
+
+Electric underfloor heating (0.5 kW) via a Devireg thermostat. Runs on a morning schedule — the integration checks the solar forecast to ensure the battery will recover.
+
+**Setup:**
+- **Switch entity**: `switch.floor_heating_surplus` (HA template switch, see below)
+- **Power sensor**: `sensor.power_meter_floor_heating_upstairs_power_2`
+- **Mode**: Predictive
+- **Power**: 0.5 kW
+- **Priority**: 3
+- **Schedule**: 05:00–08:00
+- **Evaluation lead**: 30 minutes (checks forecast at 04:30)
+- **Max outdoor temp**: 24°C (skip in summer)
+
+**Template switch** (needed because the thermostat doesn't have a simple on/off — we set the target temperature):
+
+```yaml
+# packages/floor_heating_surplus.yaml
+template:
+  - switch:
+      - name: "Floor Heating (Surplus)"
+        state: "{{ states('sensor.power_meter_floor_heating_upstairs_power_2') | float(0) > 10 }}"
+        turn_on:
+          - action: script.turn_on
+            target:
+              entity_id: script.heat_upstairs_floor
+        turn_off:
+          - action: script.turn_on
+            target:
+              entity_id: script.heat_upstairs_floor_off
+```
+
+**Scripts:**
+```yaml
+heat_upstairs_floor:
+  sequence:
+    - action: climate.set_temperature
+      target:
+        entity_id: climate.devireg_upstairs_thermostat
+      data:
+        temperature: 28
+        hvac_mode: heat
+  mode: restart
+
+heat_upstairs_floor_off:
+  sequence:
+    - action: climate.set_temperature
+      target:
+        entity_id: climate.devireg_upstairs_thermostat
+      data:
+        temperature: 15
+        hvac_mode: "off"
+  mode: restart
+```
+
+**Why predictive:** Floor heating draws from the battery during early morning (no solar). The integration simulates the day ahead — if the solar forecast shows enough production to recharge the battery AND still leave surplus for the water heater (reactive loads), it approves the schedule. If the forecast is poor, it skips the day.
+
+### Floor Heating Downstairs (Reactive)
+
+A second floor heating zone (0.63 kW) via another Devireg thermostat, monitored by a Shelly 3EM energy meter.
+
+**Setup:**
+- **Switch entity**: `switch.floor_heating_downstairs_surplus` (template switch, same pattern)
+- **Power sensor**: `sensor.shelly3em63g3_b08184e0d6c0_energy_meter_2_power`
+- **Mode**: Reactive
+- **Power**: 0.63 kW
+- **Priority**: 5 (runs after water heater gets surplus)
+- **SOC ON threshold**: 90%
+- **SOC OFF threshold**: 85%
+- **Max outdoor temp**: 24°C (skip in summer)
+
+**Why reactive (not predictive):** This zone heats during the day when there's solar surplus available. Lower priority than the water heater ensures hot water comes first.
+
+### Tips for Adding Your Own Loads
+
+1. **Simple on/off loads** (smart plug, relay): use the switch entity directly
+2. **Thermostat-controlled loads**: create a template switch that sets temperature on turn_on and turns off on turn_off (see floor heating example)
+3. **Set priorities carefully**: lower number = higher priority. Water heater at 1 means it always gets surplus first
+4. **SOC thresholds**: use 90%+ for reactive loads (ensures battery is full before diverting). Solax inverters start exporting around 97-98% SOC
+5. **Anti-flap interval**: increase to 1800s+ on cloudy days to reduce relay switching. The default 300s can cause 10+ cycles/day with variable clouds
+6. **Outdoor temp gating**: set `max_outdoor_temp` for seasonal loads (heating) to avoid wasting energy in summer
+7. **Power sensors**: always configure if available — the integration uses actual power for energy tracking instead of the configured maximum
 
 ## Architecture
 

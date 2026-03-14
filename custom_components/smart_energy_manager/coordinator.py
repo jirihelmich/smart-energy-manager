@@ -853,21 +853,24 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # but only *claim* power_kw * utilization_factor from the pool,
                 # so lower-priority loads benefit from historical underutilization.
                 if self.surplus_controller and self.surplus_controller.configs:
-                    configs = sorted(
-                        self.surplus_controller.configs, key=lambda c: c.priority
+                    reactive_configs = sorted(
+                        [c for c in self.surplus_controller.configs if c.mode == "reactive"],
+                        key=lambda c: c.priority,
                     )
-                    factors = self.surplus_controller.get_utilization_factors()
-                    load_runtimes: dict[str, float] = {c.name: 0.0 for c in configs}
-                    for _hour, kwh in sorted(surplus_forecast.hourly_kwh.items()):
-                        remaining = kwh
-                        for cfg in configs:
-                            if remaining <= 0:
-                                break
-                            if remaining >= cfg.power_kw:
-                                load_runtimes[cfg.name] += 1.0
-                                # Claim only historical usage from pool
-                                factor = factors.get(cfg.name, 1.0)
-                                remaining -= cfg.power_kw * factor
+                    load_runtimes: dict[str, float] = {
+                        c.name: 0.0 for c in self.surplus_controller.configs
+                    }
+                    # Total surplus pool available for reactive loads
+                    remaining_pool = surplus_forecast.total_kwh
+                    surplus_hours = surplus_forecast.surplus_hours
+                    for cfg in reactive_configs:
+                        min_on_hours = cfg.min_switch_interval / 3600
+                        min_on_energy = cfg.power_kw * min_on_hours
+                        if remaining_pool >= min_on_energy:
+                            # Load can run — calculate hours from available surplus
+                            run_hours = min(remaining_pool / cfg.power_kw, surplus_hours)
+                            load_runtimes[cfg.name] = run_hours
+                            remaining_pool -= cfg.power_kw * run_hours
                     data["surplus_predicted_runtimes"] = {
                         name: round(hours, 1)
                         for name, hours in load_runtimes.items()

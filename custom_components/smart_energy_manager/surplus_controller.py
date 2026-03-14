@@ -91,6 +91,12 @@ class SurplusLoadController:
         self._configs: list[SurplusLoadConfig] = []
         self._daily_surplus_seconds: float = 0.0  # Actual seconds with grid export > 0 today
         self._last_surplus_tick_time: float = 0.0
+        self._last_surplus_energy_today: float = 0.0
+
+    @property
+    def surplus_energy_today_kwh(self) -> float:
+        """Total energy consumed by surplus loads today (kWh)."""
+        return self._last_surplus_energy_today
 
     def load_configs(self) -> None:
         """Reload configs from options and sync states."""
@@ -647,6 +653,11 @@ class SurplusLoadController:
             cfg.power_kw for cfg in self._configs
             if self._states.get(cfg.switch_entity, SurplusLoadState()).is_running
         )
+
+        self._last_surplus_energy_today = round(sum(
+            self._states.get(cfg.switch_entity, SurplusLoadState()).daily_energy_kwh
+            for cfg in self._configs
+        ), 2)
 
         return {
             "surplus_active_loads": len(active_loads),

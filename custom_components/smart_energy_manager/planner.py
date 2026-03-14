@@ -42,6 +42,23 @@ class ChargingPlanner:
         self._coordinator = coordinator
         self.last_overnight_need: OvernightNeed | None = None
 
+    # --- Surplus energy baseline ---
+
+    def _avg_surplus_energy(self) -> float:
+        """Average daily energy consumed by surplus loads (from runtime history).
+
+        Used to subtract from avg consumption in surplus forecasts so that
+        surplus load energy doesn't inflate consumption and kill future surplus.
+        """
+        history = self._coordinator.store.surplus_runtime_history
+        if not history:
+            return 0.0
+        totals = []
+        for entry in history:
+            energy = entry.get("energy_kwh") or {}
+            totals.append(sum(energy.values()))
+        return sum(totals) / len(totals) if totals else 0.0
+
     # --- Hourly consumption model ---
 
     def _hourly_consumption(self, hour: int, daily: float) -> float:
@@ -136,6 +153,7 @@ class ChargingPlanner:
 
         # --- Base parameters ---
         daily_consumption = c.consumption_tracker.average(c.store.consumption_history)
+        daily_consumption = max(0.0, daily_consumption - self._avg_surplus_energy())
         tomorrow = now + timedelta(days=1)
         if tomorrow.weekday() >= 5:
             daily_consumption *= c.weekend_consumption_multiplier
@@ -457,12 +475,15 @@ class ChargingPlanner:
 
         Simulates SOC from now through end of today. At each hour where
         battery is at max and solar > consumption, the excess is surplus.
+        Uses baseline consumption (avg minus surplus load energy) to avoid
+        a feedback loop where surplus loads inflate consumption estimates.
         """
         if now is None:
             now = _default_now()
         c = self._coordinator
 
         daily_consumption = c.consumption_tracker.average(c.store.consumption_history)
+        daily_consumption = max(0.0, daily_consumption - self._avg_surplus_energy())
         if now.weekday() >= 5:
             daily_consumption *= c.weekend_consumption_multiplier
 
@@ -529,6 +550,7 @@ class ChargingPlanner:
         c = self._coordinator
 
         daily_consumption = c.consumption_tracker.average(c.store.consumption_history)
+        daily_consumption = max(0.0, daily_consumption - self._avg_surplus_energy())
         if now.weekday() >= 5:
             daily_consumption *= c.weekend_consumption_multiplier
 
@@ -633,6 +655,7 @@ class ChargingPlanner:
         Simulates SOC from hour 0 through 23 using tomorrow's solar profile.
         Starting SOC: assumes battery at min_soc (conservative — overnight drain,
         charging would raise it but surplus is best estimated conservatively).
+        Uses baseline consumption (avg minus surplus load energy).
         """
         if now is None:
             now = _default_now()
@@ -640,6 +663,7 @@ class ChargingPlanner:
 
         tomorrow = now + timedelta(days=1)
         daily_consumption = c.consumption_tracker.average(c.store.consumption_history)
+        daily_consumption = max(0.0, daily_consumption - self._avg_surplus_energy())
         if tomorrow.weekday() >= 5:
             daily_consumption *= c.weekend_consumption_multiplier
 
