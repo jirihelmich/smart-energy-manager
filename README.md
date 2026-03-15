@@ -84,6 +84,46 @@ Configure via Settings > Devices > Smart Energy Manager > Configure > Surplus Lo
 - **Predictive mode**: runs on daily schedule, pre-evaluated against solar forecast
 - **Per-load settings**: power draw, priority, SOC thresholds, margins, switch interval, max outdoor temp
 
+### Dashboard
+
+A template dashboard is included in `dashboards/dashboard_template.yaml` with 3 views: Scheduled Charging, Analytics, and Surplus.
+
+**Required custom cards** (install via HACS):
+- [apexcharts-card](https://github.com/RomRider/apexcharts-card) — all charts and graphs
+- [gauge-card-pro](https://github.com/benjamin-dcs/gauge-card-pro) — battery and price gauges
+
+**Setup:**
+
+1. Install the required custom cards via HACS
+2. Copy `dashboards/dashboard_template.yaml` content
+3. In HA, go to Settings > Dashboards > Add Dashboard > select "sections" view
+4. Open the dashboard, click the three-dot menu > Raw Configuration Editor
+5. Paste the template YAML
+6. Search and replace these placeholders with your entity IDs:
+
+| Placeholder | Description | Example |
+|-------------|-------------|---------|
+| `YOUR_BATTERY_SOC_SENSOR` | Battery state of charge (%) | `sensor.solax_inverter_battery_capacity` |
+| `YOUR_PRICE_SENSOR` | Spot electricity price with hourly attributes | `sensor.current_spot_electricity_price` |
+| `YOUR_ACTUAL_SOLAR_SENSOR` | Today's actual solar production (resets at midnight) | `sensor.solax_inverter_today_s_solar_energy` |
+| `YOUR_CONSUMPTION_SENSOR` | Daily home consumption (resets at midnight) | `sensor.home_consumption_energy` |
+| `YOUR_GRID_EXPORT_POWER_SENSOR` | Real-time grid export power (W) | `sensor.solax_inverter_grid_export` |
+
+**Optional placeholders** (remove the card if you don't have these):
+
+| Placeholder | Description |
+|-------------|-------------|
+| `YOUR_CHEAPEST_PRICE_SENSOR` | Today's cheapest electricity price (gauge min indicator) |
+| `YOUR_EXPENSIVE_PRICE_SENSOR` | Today's most expensive electricity price (gauge max indicator) |
+
+**Adjustments you may want to make:**
+- Battery gauge inner max: change `15` to your battery capacity in kWh
+- Price gauge range: adjust `min: -1` / `max: 8` for your electricity pricing
+- Price threshold annotation: adjust `y: 4` to your max charge price
+- Min SOC annotation: adjust `y: 20` to your configured min SOC
+- Live Power Draw chart: uncomment and add one series per surplus load with its power sensor
+- Solar vs Export chart: uncomment and add your daily solar/export energy sensors
+
 ## Entities Created
 
 ### Sensors

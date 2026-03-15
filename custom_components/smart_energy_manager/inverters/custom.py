@@ -11,7 +11,7 @@ TEMPLATE = InverterTemplate(
     label="Custom / Other",
     description="Manual configuration for any inverter",
     control_type="select",
-    battery_capacity=15.0,
+    battery_capacity=10.0,
     entity_hints={},
 )
 

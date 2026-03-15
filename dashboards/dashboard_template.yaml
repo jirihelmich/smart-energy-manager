@@ -1,0 +1,1338 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Smart Energy Manager — Dashboard Template
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# This is a template dashboard for the Smart Energy Manager integration.
+# You need to customize it for your setup before using it.
+#
+# REQUIRED CHANGES (search for these placeholders and replace):
+#   YOUR_BATTERY_SOC_SENSOR       — your inverter's battery SOC % sensor
+#                                   e.g., sensor.solax_inverter_battery_capacity
+#   YOUR_PRICE_SENSOR             — spot electricity price sensor (with hourly attributes)
+#                                   e.g., sensor.current_spot_electricity_price
+#   YOUR_ACTUAL_SOLAR_SENSOR      — today's actual solar production (resets at midnight)
+#                                   e.g., sensor.solax_inverter_today_s_solar_energy
+#   YOUR_CONSUMPTION_SENSOR       — daily home consumption (resets at midnight)
+#                                   e.g., sensor.home_consumption_energy
+#   YOUR_GRID_EXPORT_POWER_SENSOR — real-time grid export in W
+#                                   e.g., sensor.inverter_grid_export
+#
+# OPTIONAL CHANGES:
+#   YOUR_CHEAPEST_PRICE_SENSOR    — today's cheapest price (for gauge min indicator)
+#   YOUR_EXPENSIVE_PRICE_SENSOR   — today's most expensive price (for gauge max indicator)
+#   YOUR_GRID_EXPORT_ENERGY_SENSOR — daily grid export energy in kWh
+#   YOUR_SOLAR_PRODUCTION_ENERGY_SENSOR — daily solar production energy in kWh
+#   Battery capacity (inner gauge max) — change "15" to your capacity in kWh
+#   Price gauge min/max — adjust -1/8 range to match your electricity pricing
+#   Price threshold annotation — adjust "y: 4" to your max charge price
+#   Min SOC annotation — adjust "y: 20" to your min SOC setting
+#
+# REQUIRED CUSTOM CARDS (install via HACS):
+#   - apexcharts-card (https://github.com/RomRider/apexcharts-card)
+#   - gauge-card-pro  (https://github.com/benjamin-dcs/gauge-card-pro)
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+views:
+  # ═════════════════════════════════════════════════════════════════════════════
+  #  View 1: Scheduled Charging
+  # ═════════════════════════════════════════════════════════════════════════════
+  - type: sections
+    cards: []
+    title: Scheduled Charging
+    sections:
+      # ── Row 1: Gauges & Price Chart ──────────────────────────────────────
+      - type: grid
+        cards:
+          # Price history chart (2-day, hourly columns from sensor attributes)
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              show_states: true
+              colorize_states: true
+            graph_span: 2d
+            span:
+              start: day
+            now:
+              show: true
+              label: Now
+            series:
+              - entity: YOUR_PRICE_SENSOR  # ← Replace
+                float_precision: 2
+                type: column
+                show:
+                  in_header: raw
+                data_generator: >
+                  return Object.entries(entity.attributes).map(([date, value],
+                  index) => {
+                    return [new Date(date).getTime() + (30 * 60 * 1000), value];
+                  });
+
+          # Electricity price gauge with setpoint and min/max indicators
+          # Remove min_indicator/max_indicator if you don't have cheapest/expensive sensors
+          - type: custom:gauge-card-pro
+            entity: YOUR_PRICE_SENSOR  # ← Replace
+            needle: true
+            gradient: true
+            round: full
+            min: -1   # ← Adjust for your price range
+            max: 8    # ← Adjust for your price range
+            titles:
+              primary: Electricity Price
+              primary_font_size: 14px
+            setpoint:
+              type: entity
+              value: number.smart_energy_manager_max_charge_price
+              color: '#1565c0'
+              label: true
+              precision: 1
+            # Optional: remove if you don't have these sensors
+            min_indicator:
+              type: entity
+              value: YOUR_CHEAPEST_PRICE_SENSOR  # ← Replace or remove block
+              color: '#43a047'
+              label: true
+              precision: 1
+            max_indicator:
+              type: entity
+              value: YOUR_EXPENSIVE_PRICE_SENSOR  # ← Replace or remove block
+              color: '#e53935'
+              label: true
+              precision: 1
+            segments:
+              - from: -1
+                color: '#43a047'
+              - from: 1
+                color: '#8bc34a'
+              - from: 2.5
+                color: '#fdd835'
+              - from: 4
+                color: '#fb8c00'
+              - from: 6
+                color: '#e53935'
+
+          # Dual battery gauge: SOC (outer) + usable charge in kWh (inner)
+          - type: custom:gauge-card-pro
+            entity: YOUR_BATTERY_SOC_SENSOR  # ← Replace
+            entity2: sensor.smart_energy_manager_battery_usable_charge
+            needle: true
+            gradient: true
+            round: full
+            min: 0
+            max: 100
+            titles:
+              primary: Battery
+              primary_font_size: 14px
+            inner:
+              min: 0
+              max: 15   # ← Change to your battery capacity in kWh
+              mode: severity
+              round: full
+              segments:
+                - from: 0
+                  color: '#e53935'
+                - from: 3
+                  color: '#fb8c00'
+                - from: 6
+                  color: '#fdd835'
+                - from: 9
+                  color: '#8bc34a'
+                - from: 12
+                  color: '#43a047'
+            setpoint:
+              type: entity
+              value: number.smart_energy_manager_max_charge_level
+              color: '#1565c0'
+              label: true
+              precision: 0
+            min_indicator:
+              type: entity
+              value: number.smart_energy_manager_min_soc
+              color: '#e53935'
+              label: true
+              precision: 0
+            segments:
+              - from: 0
+                color: '#e53935'
+              - from: 15
+                color: '#fb8c00'
+              - from: 30
+                color: '#fdd835'
+              - from: 50
+                color: '#8bc34a'
+              - from: 70
+                color: '#43a047'
+
+      # ── Row 2: Night Charging Status ─────────────────────────────────────
+      - type: grid
+        cards:
+          - type: vertical-stack
+            cards:
+              - type: entities
+                title: Night Charging
+                show_header_toggle: false
+                entities:
+                  - entity: sensor.smart_energy_manager_night_charging_status
+                    name: Status
+                  - entity: switch.smart_energy_manager_enabled
+                    name: Automation Enabled
+                  - entity: binary_sensor.smart_energy_manager_charging_active
+                    name: Charging Now
+              - type: glance
+                title: Battery & Forecast
+                columns: 3
+                show_state: true
+                entities:
+                  - entity: YOUR_BATTERY_SOC_SENSOR  # ← Replace
+                    name: Battery
+                  - entity: sensor.smart_energy_manager_average_daily_consumption
+                    name: Avg Use
+                  - entity: sensor.smart_energy_manager_today_solar_forecast
+                    name: Solar today
+                    icon: mdi:weather-sunny
+                  - entity: YOUR_ACTUAL_SOLAR_SENSOR  # ← Replace
+                    name: Actual today
+                    icon: mdi:solar-power
+                  - entity: sensor.smart_energy_manager_tomorrow_solar_forecast
+                    name: Solar tmrw
+                  - entity: sensor.smart_energy_manager_solar_forecast_error_average
+                    name: Fcst Error
+                  - entity: sensor.smart_energy_manager_tomorrow_energy_forecast
+                    name: Deficit
+                  - entity: sensor.smart_energy_manager_electricity_price_status
+                    name: Price
+              - type: conditional
+                conditions:
+                  - condition: state
+                    entity: sensor.smart_energy_manager_night_charging_status
+                    state: Scheduled
+                card:
+                  type: entities
+                  title: Tonight's Schedule
+                  entities:
+                    - entity: sensor.smart_energy_manager_night_charging_status
+                      type: attribute
+                      attribute: schedule_start
+                      name: Start Hour
+                      icon: mdi:clock-start
+                    - entity: sensor.smart_energy_manager_night_charging_status
+                      type: attribute
+                      attribute: schedule_end
+                      name: End Hour
+                      icon: mdi:clock-end
+                    - entity: sensor.smart_energy_manager_night_charging_status
+                      type: attribute
+                      attribute: charge_needed
+                      name: Required Charge (kWh)
+              - type: glance
+                title: Last Night's Charge
+                columns: 3
+                show_state: true
+                show_name: true
+                entities:
+                  - entity: sensor.smart_energy_manager_last_night_charge_kwh
+                    name: Charged
+                  - entity: sensor.smart_energy_manager_last_charge_battery_range
+                    name: Battery
+                    icon: mdi:battery-arrow-up
+                  - entity: sensor.smart_energy_manager_last_charge_time_range
+                    name: Time
+                    icon: mdi:clock-outline
+                  - entity: sensor.smart_energy_manager_last_charge_total_cost
+                    name: Cost
+
+      # ── Row 3: History Charts ────────────────────────────────────────────
+      - type: grid
+        cards:
+          - graph: line
+            type: sensor
+            entity: sensor.smart_energy_manager_tomorrow_solar_forecast
+            detail: 1
+            grid_options:
+              columns: 12
+              rows: 2
+            hours_to_show: 72
+          - graph: line
+            type: sensor
+            entity: sensor.smart_energy_manager_average_daily_consumption
+            detail: 1
+            hours_to_show: 72
+            grid_options:
+              columns: 12
+              rows: 2
+          - graph: line
+            type: sensor
+            entity: sensor.smart_energy_manager_tomorrow_energy_forecast
+            detail: 1
+            hours_to_show: 72
+            grid_options:
+              columns: 12
+              rows: 2
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              show_states: true
+              colorize_states: true
+            graph_span: 7d
+            span:
+              end: day
+            grid_options:
+              columns: 12
+            series:
+              - entity: sensor.smart_energy_manager_last_night_charge_kwh
+                type: column
+                name: Night Charges
+                float_precision: 1
+                unit: ' kWh'
+                color: '#4caf50'
+                show:
+                  in_header: true
+                data_generator: >
+                  const h = entity.attributes.history;
+                  if (!h || !Array.isArray(h) || h.length === 0) return [];
+                  const now = new Date();
+                  return h.map((v, i) => {
+                    const d = new Date(now);
+                    d.setDate(d.getDate() - 1 - i);
+                    d.setHours(12, 0, 0, 0);
+                    return [d.getTime(), v];
+                  }).reverse();
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              show_states: true
+              colorize_states: true
+            graph_span: 7d
+            span:
+              end: day
+            grid_options:
+              columns: 12
+            series:
+              - entity: sensor.smart_energy_manager_solar_forecast_error_average
+                type: column
+                name: PV Forecast Error
+                float_precision: 1
+                unit: '%'
+                color: '#ff9800'
+                show:
+                  in_header: true
+                data_generator: >
+                  const h = entity.attributes.history;
+                  if (!h || !Array.isArray(h) || h.length === 0) return [];
+                  const now = new Date();
+                  return h.map((v, i) => {
+                    const d = new Date(now);
+                    d.setDate(d.getDate() - 1 - i);
+                    d.setHours(12, 0, 0, 0);
+                    return [d.getTime(), Math.round(v * 1000) / 10];
+                  }).reverse();
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              show_states: true
+              colorize_states: true
+            graph_span: 7d
+            span:
+              end: day
+            grid_options:
+              columns: 12
+            series:
+              - entity: sensor.smart_energy_manager_average_daily_consumption
+                type: column
+                name: Daily Consumption
+                float_precision: 1
+                unit: ' kWh'
+                color: '#2196f3'
+                show:
+                  in_header: true
+                data_generator: >
+                  const h = entity.attributes.history;
+                  if (!h || !Array.isArray(h) || h.length === 0) return [];
+                  const now = new Date();
+                  return h.map((v, i) => {
+                    const d = new Date(now);
+                    d.setDate(d.getDate() - 1 - i);
+                    d.setHours(12, 0, 0, 0);
+                    return [d.getTime(), v];
+                  }).reverse();
+    max_columns: 4
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  #  View 2: Analytics
+  # ═════════════════════════════════════════════════════════════════════════════
+  - type: sections
+    cards: []
+    title: Analytics
+    max_columns: 4
+    sections:
+      # ── Solar Accuracy ───────────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: "Solar: Forecast vs Actual"
+              show_states: true
+              colorize_states: true
+            graph_span: 7d
+            span:
+              end: day
+            yaxis:
+              - id: kwh
+                min: 0
+                apex_config:
+                  title:
+                    text: kWh
+            apex_config:
+              plotOptions:
+                bar:
+                  columnWidth: "40%"
+            series:
+              - entity: sensor.smart_energy_manager_today_solar_forecast
+                name: Forecast
+                type: column
+                color: "#ff9800"
+                yaxis_id: kwh
+                group_by:
+                  func: last
+                  duration: 1d
+                show:
+                  in_header: raw
+              - entity: YOUR_ACTUAL_SOLAR_SENSOR  # ← Replace
+                name: Actual
+                type: column
+                color: "#4caf50"
+                yaxis_id: kwh
+                group_by:
+                  func: max
+                  duration: 1d
+                show:
+                  in_header: raw
+            grid_options:
+              columns: 12
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Forecast Error Trend
+              show_states: true
+              colorize_states: true
+            graph_span: 7d
+            span:
+              end: day
+            yaxis:
+              - id: pct
+                apex_config:
+                  title:
+                    text: "%"
+                  labels:
+                    formatter: |
+                      EVAL:function(val) { return val.toFixed(0) + '%'; }
+            series:
+              - entity: sensor.smart_energy_manager_today_solar_forecast_error
+                name: Daily Error
+                type: column
+                color: "#ff9800"
+                yaxis_id: pct
+                group_by:
+                  func: last
+                  duration: 1d
+                show:
+                  in_header: raw
+              - entity: sensor.smart_energy_manager_solar_forecast_error_average
+                name: 7d Average
+                type: line
+                color: "#f44336"
+                stroke_width: 2
+                yaxis_id: pct
+                group_by:
+                  func: avg
+                  duration: 1d
+                show:
+                  in_header: raw
+            grid_options:
+              columns: 12
+
+      # ── Energy Balance ───────────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Daily Energy Balance
+              show_states: true
+              colorize_states: true
+            graph_span: 7d
+            span:
+              end: day
+            yaxis:
+              - id: kwh
+                min: 0
+                apex_config:
+                  title:
+                    text: kWh
+            apex_config:
+              chart:
+                stacked: false
+              plotOptions:
+                bar:
+                  columnWidth: "60%"
+            series:
+              - entity: YOUR_CONSUMPTION_SENSOR  # ← Replace
+                name: Consumption
+                type: column
+                color: "#f44336"
+                yaxis_id: kwh
+                group_by:
+                  func: max
+                  duration: 1d
+                show:
+                  in_header: raw
+              - entity: sensor.smart_energy_manager_last_night_charge_kwh
+                name: Grid Charge
+                type: column
+                color: "#9c27b0"
+                yaxis_id: kwh
+                show:
+                  in_header: false
+                data_generator: >
+                  const hist = entity.attributes.session_history || [];
+                  const map = {};
+                  hist.forEach(e => { if (e.date) map[e.date] = e.kwh || 0; });
+                  const data = []; const now = new Date();
+                  for (let i = 6; i >= 0; i--) { const d = new Date(now); d.setDate(d.getDate() - i); const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); d.setHours(12, 0, 0, 0); data.push([d.getTime(), map[key] || 0]); }
+                  return data;
+              - entity: YOUR_ACTUAL_SOLAR_SENSOR  # ← Replace
+                name: Solar Actual
+                type: column
+                color: "#ff9800"
+                yaxis_id: kwh
+                group_by:
+                  func: max
+                  duration: 1d
+                show:
+                  in_header: raw
+            grid_options:
+              columns: 12
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Nightly Charging Cost
+              show_states: true
+              colorize_states: true
+            graph_span: 30d
+            span:
+              end: day
+            yaxis:
+              - id: cost
+                min: 0
+                apex_config:
+                  title:
+                    text: cost
+            series:
+              - entity: sensor.smart_energy_manager_last_night_charge_kwh
+                name: Cost
+                type: column
+                color: "#e91e63"
+                yaxis_id: cost
+                float_precision: 1
+                show:
+                  in_header: false
+                data_generator: >
+                  const hist = entity.attributes.session_history || [];
+                  const map = {};
+                  hist.forEach(e => { if (e.date) map[e.date] = e.cost || 0; });
+                  const data = []; const now = new Date();
+                  for (let i = 29; i >= 0; i--) { const d = new Date(now); d.setDate(d.getDate() - i); const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); d.setHours(12, 0, 0, 0); data.push([d.getTime(), map[key] || 0]); }
+                  return data;
+            grid_options:
+              columns: 12
+
+      # ── Battery & Price ──────────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Battery SOC (48h)
+              show_states: true
+              colorize_states: true
+            graph_span: 48h
+            yaxis:
+              - id: soc
+                min: 0
+                max: 100
+                apex_config:
+                  title:
+                    text: SOC %
+              - id: active
+                min: 0
+                max: 1
+                show: false
+            now:
+              show: true
+              label: Now
+            series:
+              - entity: YOUR_BATTERY_SOC_SENSOR  # ← Replace
+                name: Battery SOC
+                type: area
+                color: "#4caf50"
+                yaxis_id: soc
+                stroke_width: 2
+                opacity: 0.15
+                show:
+                  in_header: raw
+              - entity: binary_sensor.smart_energy_manager_charging_active
+                name: Charging
+                type: area
+                curve: stepline
+                color: "#9c27b0"
+                yaxis_id: active
+                stroke_width: 0
+                opacity: 0.3
+                transform: "return x === 'on' ? 1 : 0;"
+                extend_to: end
+                group_by:
+                  func: last
+                  duration: 5min
+                  fill: last
+                show:
+                  in_header: false
+                  legend_value: false
+            apex_config:
+              annotations:
+                yaxis:
+                  - y: 20  # ← Adjust to your min SOC
+                    yAxisIndex: 0
+                    borderColor: "#f44336"
+                    strokeDashArray: 4
+                    label:
+                      text: Min SOC
+                      style:
+                        color: "#f44336"
+                        background: "transparent"
+            grid_options:
+              columns: 12
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Price & Charging (48h)
+              show_states: true
+              colorize_states: true
+            graph_span: 48h
+            yaxis:
+              - id: price
+                min: ~0
+                apex_config:
+                  title:
+                    text: Price
+              - id: active
+                min: 0
+                max: 1
+                show: false
+            now:
+              show: true
+              label: Now
+            series:
+              - entity: YOUR_PRICE_SENSOR  # ← Replace
+                name: Price
+                type: column
+                color: "#2196f3"
+                yaxis_id: price
+                float_precision: 2
+                show:
+                  in_header: raw
+              - entity: binary_sensor.smart_energy_manager_charging_active
+                name: Charging
+                type: area
+                curve: stepline
+                color: "#4caf50"
+                yaxis_id: active
+                stroke_width: 0
+                opacity: 0.3
+                transform: "return x === 'on' ? 1 : 0;"
+                extend_to: end
+                group_by:
+                  func: last
+                  duration: 5min
+                  fill: last
+                show:
+                  in_header: false
+                  legend_value: false
+            apex_config:
+              annotations:
+                yaxis:
+                  - y: 4  # ← Adjust to your max charge price
+                    yAxisIndex: 0
+                    borderColor: "#ff9800"
+                    strokeDashArray: 4
+                    label:
+                      text: Price Threshold
+                      style:
+                        color: "#ff9800"
+                        background: "transparent"
+            grid_options:
+              columns: 12
+
+      # ── Long-term Trends ─────────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Grid Charging (30d)
+              show_states: true
+              colorize_states: true
+            graph_span: 30d
+            span:
+              end: day
+            yaxis:
+              - id: kwh
+                min: 0
+                apex_config:
+                  title:
+                    text: kWh
+            series:
+              - entity: sensor.smart_energy_manager_last_night_charge_kwh
+                name: Nightly Charge
+                type: column
+                color: "#9c27b0"
+                yaxis_id: kwh
+                float_precision: 1
+                show:
+                  in_header: false
+                data_generator: >
+                  const hist = entity.attributes.session_history || [];
+                  const map = {};
+                  hist.forEach(e => { if (e.date) map[e.date] = e.kwh || 0; });
+                  const data = []; const now = new Date();
+                  for (let i = 29; i >= 0; i--) { const d = new Date(now); d.setDate(d.getDate() - i); const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); d.setHours(12, 0, 0, 0); data.push([d.getTime(), map[key] || 0]); }
+                  return data;
+            grid_options:
+              columns: 12
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Grid Dependency (30d)
+              show_states: true
+              colorize_states: true
+            graph_span: 30d
+            span:
+              end: day
+            yaxis:
+              - id: pct
+                min: 0
+                max: 100
+                apex_config:
+                  title:
+                    text: "%"
+                  labels:
+                    formatter: |
+                      EVAL:function(val) { return val.toFixed(0) + '%'; }
+            series:
+              - entity: sensor.smart_energy_manager_grid_dependency
+                name: Grid Dependency
+                type: column
+                color: "#ff9800"
+                yaxis_id: pct
+                float_precision: 0
+                statistics:
+                  type: mean
+                  period: day
+                show:
+                  in_header: raw
+            grid_options:
+              columns: 12
+
+      # ── Daily Consumption ────────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Daily Consumption (30d)
+              show_states: true
+              colorize_states: true
+            graph_span: 30d
+            span:
+              end: day
+            yaxis:
+              - id: kwh
+                min: 0
+                apex_config:
+                  title:
+                    text: kWh
+            series:
+              - entity: YOUR_CONSUMPTION_SENSOR  # ← Replace
+                name: Consumption
+                type: column
+                color: "#2196f3"
+                yaxis_id: kwh
+                float_precision: 1
+                group_by:
+                  func: max
+                  duration: 1d
+                show:
+                  in_header: raw
+              - entity: sensor.smart_energy_manager_average_daily_consumption
+                name: 7d Average
+                type: line
+                color: "#f44336"
+                stroke_width: 2
+                yaxis_id: kwh
+                group_by:
+                  func: avg
+                  duration: 1d
+                show:
+                  in_header: raw
+            grid_options:
+              columns: 12
+
+      # ── Gauges & Analytics ───────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: custom:gauge-card-pro
+            entity: sensor.smart_energy_manager_self_consumption_ratio
+            needle: true
+            gradient: true
+            round: full
+            min: 0
+            max: 100
+            titles:
+              primary: Self Consumption
+              primary_font_size: 14px
+            segments:
+              - from: 0
+                color: '#e53935'
+              - from: 30
+                color: '#fb8c00'
+              - from: 60
+                color: '#fdd835'
+              - from: 80
+                color: '#8bc34a'
+              - from: 90
+                color: '#43a047'
+            grid_options:
+              columns: 6
+          - type: custom:gauge-card-pro
+            entity: sensor.smart_energy_manager_grid_dependency
+            needle: true
+            gradient: true
+            round: full
+            min: 0
+            max: 100
+            titles:
+              primary: Grid Dependency
+              primary_font_size: 14px
+            segments:
+              - from: 0
+                color: '#43a047'
+              - from: 20
+                color: '#8bc34a'
+              - from: 40
+                color: '#fdd835'
+              - from: 60
+                color: '#fb8c00'
+              - from: 80
+                color: '#e53935'
+            grid_options:
+              columns: 6
+          - type: glance
+            title: Charging Analytics
+            columns: 3
+            show_state: true
+            show_name: true
+            entities:
+              - entity: sensor.smart_energy_manager_morning_soc
+                name: Morning SOC
+                icon: mdi:battery-clock
+              - entity: sensor.smart_energy_manager_planned_vs_actual_charge
+                name: Actual Charge
+                icon: mdi:chart-bar
+              - entity: sensor.smart_energy_manager_weekly_charging_cost
+                name: Weekly Cost
+              - entity: sensor.smart_energy_manager_charging_savings
+                name: Weekly Savings
+              - entity: sensor.smart_energy_manager_bms_battery_capacity
+                name: BMS Capacity
+            grid_options:
+              columns: 12
+
+      # ── BMS Capacity ─────────────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: BMS Battery Capacity (90d)
+              show_states: true
+              colorize_states: true
+            graph_span: 90d
+            span:
+              end: day
+            yaxis:
+              - id: kwh
+                apex_config:
+                  title:
+                    text: kWh
+            series:
+              - entity: sensor.smart_energy_manager_bms_battery_capacity
+                name: Capacity
+                type: line
+                color: "#9c27b0"
+                stroke_width: 2
+                yaxis_id: kwh
+                float_precision: 2
+                statistics:
+                  type: max
+                  period: day
+                show:
+                  in_header: raw
+            grid_options:
+              columns: 12
+
+      # ── Charging Cost & Savings ──────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Charging Cost & Savings (30d)
+              show_states: true
+              colorize_states: true
+            graph_span: 30d
+            span:
+              end: day
+            yaxis:
+              - id: cost
+                min: 0
+                apex_config:
+                  title:
+                    text: cost
+            series:
+              - entity: sensor.smart_energy_manager_weekly_charging_cost
+                name: Weekly Cost
+                type: line
+                color: "#e91e63"
+                stroke_width: 2
+                yaxis_id: cost
+                float_precision: 1
+                statistics:
+                  type: max
+                  period: day
+                show:
+                  in_header: raw
+              - entity: sensor.smart_energy_manager_charging_savings
+                name: Weekly Savings
+                type: line
+                color: "#4caf50"
+                stroke_width: 2
+                yaxis_id: cost
+                float_precision: 1
+                statistics:
+                  type: max
+                  period: day
+                show:
+                  in_header: raw
+            grid_options:
+              columns: 12
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  #  View 3: Surplus Load Management
+  # ═════════════════════════════════════════════════════════════════════════════
+  - type: sections
+    title: Surplus
+    cards: []
+    max_columns: 3
+    sections:
+      # ── Col 1: Status & Controls ─────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: entities
+            title: Surplus Status
+            show_header_toggle: false
+            entities:
+              - entity: sensor.smart_energy_manager_surplus_load_status
+                name: Active Loads
+              - entity: YOUR_BATTERY_SOC_SENSOR  # ← Replace
+                name: Battery SOC
+              - entity: YOUR_GRID_EXPORT_POWER_SENSOR  # ← Replace
+                name: Grid Export (W)
+            grid_options:
+              columns: 12
+          - type: markdown
+            title: Load Details
+            content: >-
+              {% set details =
+              state_attr('sensor.smart_energy_manager_surplus_load_status',
+              'load_details') or [] %}
+              {% if details | length == 0 %}
+              *No surplus loads configured.*
+              Go to Settings → Devices → Smart Energy Manager → Configure →
+              Surplus Load Management to add loads.
+              {% else %}
+              <table width="100%" cellspacing="0" cellpadding="8">
+              <tr><th align="left">Load</th><th>Power</th><th>Mode</th><th>Status</th><th>Today</th></tr>
+              {%- for d in details %}
+              <tr><td align="left">{{ d.name }}</td><td>{% if d.actual_power_kw is not none %}{{ d.actual_power_kw }}{% else %}{{ d.power_kw }}{% endif %} kW</td><td>{{ d.mode | title }}</td><td>{% if d.is_device_on and d.controlled_by_automation %}🟢 Auto{% elif d.is_device_on %}🟡 Manual{% else %}⚪ OFF{% endif %}</td><td>{{ d.energy_today_kwh }} kWh</td></tr>
+              {%- endfor %}
+              </table>
+              {% endif %}
+            grid_options:
+              columns: 12
+
+          # Surplus forecast donut chart
+          - type: custom:apexcharts-card
+            chart_type: donut
+            header:
+              title: Surplus Forecast
+              show: true
+              show_states: true
+              colorize_states: true
+            apex_config:
+              legend:
+                show: false
+              dataLabels:
+                enabled: true
+                dropShadow:
+                  enabled: false
+                formatter: |
+                  EVAL:function(val, opts) {
+                    var v = opts.w.config.series[opts.seriesIndex];
+                    return v > 0 ? v.toFixed(1) : '';
+                  }
+              plotOptions:
+                pie:
+                  donut:
+                    size: '60%'
+                    labels:
+                      show: true
+                      total:
+                        show: true
+                        label: Solar
+                        formatter: |
+                          EVAL:function(w) {
+                            return w.globals.seriesTotals.reduce((a, b) => a + b, 0).toFixed(1) + ' kWh';
+                          }
+              chart:
+                height: 220
+            series:
+              - entity: sensor.smart_energy_manager_surplus_forecast
+                attribute: chart_consumption
+                name: Consumption
+                color: '#1565c0'
+              - entity: sensor.smart_energy_manager_surplus_forecast
+                attribute: chart_battery
+                name: Battery
+                color: '#f9a825'
+              - entity: sensor.smart_energy_manager_surplus_forecast
+                attribute: chart_surplus
+                name: Surplus
+                color: '#2e7d32'
+            grid_options:
+              columns: 12
+
+          # Surplus details (text)
+          - type: markdown
+            content: >-
+              {% set surplus = states('sensor.smart_energy_manager_surplus_forecast') | float(0) %}
+              {% set hours = state_attr('sensor.smart_energy_manager_surplus_forecast', 'surplus_hours') | int(0) %}
+              {% set full_hour = state_attr('sensor.smart_energy_manager_surplus_forecast', 'battery_full_hour') %}
+              {% set runtimes = state_attr('sensor.smart_energy_manager_surplus_forecast', 'predicted_runtimes') or {} %}
+              {% set day = state_attr('sensor.smart_energy_manager_surplus_forecast', 'forecast_day') or 'today' %}
+              {% if surplus > 0 %}
+              ⚡ **{{ surplus | round(1) }} kWh** surplus over **{{ hours }}**h{% if full_hour is not none %} (battery full at {{ full_hour }}:00){% endif %}{% if runtimes | length > 0 %} · {% for name, h in runtimes.items() %}{% if h > 0 %}**{{ name }}** ~{{ h }}h{% if not loop.last %} · {% endif %}{% endif %}{% endfor %}{% endif %}
+              {% else %}
+              *No surplus expected {{ "tomorrow" if day == "tomorrow" else "today" }}*
+              {% endif %}
+            grid_options:
+              columns: 12
+
+          # Current surplus (only visible when loads are active)
+          - type: conditional
+            conditions:
+              - condition: numeric_state
+                entity: sensor.smart_energy_manager_surplus_load_status
+                attribute: active_loads
+                above: 0
+            card:
+              type: glance
+              title: Current Surplus
+              columns: 3
+              show_state: true
+              entities:
+                - entity: sensor.smart_energy_manager_surplus_load_status
+                  attribute: true_surplus_kw
+                  name: True Surplus
+                  icon: mdi:solar-power
+                - entity: sensor.smart_energy_manager_surplus_load_status
+                  attribute: total_power_kw
+                  name: Load Power
+                  icon: mdi:flash
+                - entity: sensor.smart_energy_manager_surplus_load_status
+                  attribute: grid_export_kw
+                  name: Grid Export
+                  icon: mdi:transmission-tower-export
+            grid_options:
+              columns: 12
+
+      # ── Col 2: Real-time Charts ──────────────────────────────────────────
+      # NOTE: The "Live Power Draw" chart requires per-load power sensors.
+      # Add one series per surplus load with its power sensor entity.
+      # Example (uncomment and customize):
+      #
+      # - type: grid
+      #   cards:
+      #     - type: custom:apexcharts-card
+      #       header:
+      #         show: true
+      #         title: Live Power Draw
+      #         show_states: true
+      #       graph_span: 24h
+      #       span:
+      #         start: day
+      #       now:
+      #         show: true
+      #         label: Now
+      #       apex_config:
+      #         chart:
+      #           height: 200px
+      #           stacked: true
+      #         yaxis:
+      #           - title:
+      #               text: kW
+      #             decimalsInFloat: 1
+      #             min: 0
+      #       all_series_config:
+      #         type: area
+      #         stroke_width: 1
+      #         opacity: 0.4
+      #         group_by:
+      #           func: avg
+      #           duration: 5min
+      #         transform: "return x / 1000;"
+      #       series:
+      #         - entity: sensor.your_load_1_power   # ← Your load's power sensor
+      #           name: Load 1
+      #           color: "#ff6b6b"
+      #           unit: " kW"
+      #           float_precision: 2
+      #         - entity: sensor.your_load_2_power   # ← Your load's power sensor
+      #           name: Load 2
+      #           color: "#4ecdc4"
+      #           unit: " kW"
+      #           float_precision: 2
+
+      - type: grid
+        cards:
+          # Grid export power chart
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Grid Export Power
+              show_states: true
+              colorize_states: true
+            graph_span: 24h
+            apex_config:
+              chart:
+                height: 180px
+            span:
+              start: day
+            now:
+              show: true
+              label: Now
+            yaxis:
+              - id: power
+                min: ~0
+                apex_config:
+                  title:
+                    text: kW
+            series:
+              - entity: YOUR_GRID_EXPORT_POWER_SENSOR  # ← Replace
+                name: Grid Export
+                type: area
+                color: "#4caf50"
+                stroke_width: 1
+                opacity: 0.3
+                yaxis_id: power
+                group_by:
+                  func: avg
+                  duration: 15min
+                transform: "return x / 1000;"
+                show:
+                  in_header: raw
+                float_precision: 2
+            grid_options:
+              columns: 12
+
+          # Battery SOC chart (surplus view)
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Battery SOC
+              show_states: true
+              colorize_states: true
+            graph_span: 24h
+            apex_config:
+              chart:
+                height: 180px
+            span:
+              start: day
+            now:
+              show: true
+              label: Now
+            yaxis:
+              - id: pct
+                min: 0
+                max: 100
+                apex_config:
+                  title:
+                    text: "%"
+            series:
+              - entity: YOUR_BATTERY_SOC_SENSOR  # ← Replace
+                name: SOC
+                type: area
+                color: "#2196f3"
+                stroke_width: 2
+                opacity: 0.2
+                yaxis_id: pct
+                group_by:
+                  func: avg
+                  duration: 15min
+                show:
+                  in_header: raw
+                float_precision: 0
+            grid_options:
+              columns: 12
+
+      # ── Col 3: Runtime History ───────────────────────────────────────────
+      - type: grid
+        cards:
+          # Surplus energy chart — total per day
+          # For per-load breakdown, add separate series per load (see dashboard_full.yaml)
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Surplus Energy
+              show_states: false
+            graph_span: 7d
+            span:
+              end: day
+            apex_config:
+              chart:
+                height: 250
+              yaxis:
+                - title:
+                    text: kWh
+                  decimalsInFloat: 1
+              xaxis:
+                labels:
+                  format: dd MMM
+            series:
+              - entity: sensor.smart_energy_manager_surplus_load_status
+                name: Energy
+                type: column
+                color: "#ff9800"
+                float_precision: 1
+                data_generator: >
+                  const history =
+                  entity.attributes.runtime_history || [];
+
+                  return history.map(entry => {
+                    const energy = entry.energy_kwh || {};
+                    const total = Object.values(energy).reduce((a, b) => a + b, 0);
+                    return [new Date(entry.date).getTime(), total || 0];
+                  }).reverse();
+              - entity: sensor.smart_energy_manager_surplus_load_status
+                name: Runtime (h)
+                type: column
+                color: "#2196f3"
+                float_precision: 1
+                data_generator: >
+                  const history =
+                  entity.attributes.runtime_history || [];
+
+                  return history.map(entry => {
+                    const total = Object.values(entry.loads || {}).reduce((a, b) => a + b, 0);
+                    return [new Date(entry.date).getTime(), total];
+                  }).reverse();
+            grid_options:
+              columns: 12
+
+          # Utilization efficiency table
+          - type: markdown
+            title: Utilization Efficiency
+            content: >-
+              {% set factors =
+              state_attr('sensor.smart_energy_manager_surplus_load_status',
+              'utilization_factors') or {} %}
+              {% set history =
+              state_attr('sensor.smart_energy_manager_surplus_load_status',
+              'runtime_history') or [] %}
+              {% set valid = history | selectattr('surplus_hours', 'gt', 0) | list %}
+              {% if factors | length == 0 %}
+              *No historical data yet.* Utilization will appear after the first
+              full day with surplus.
+              {% else %}
+              <table width="100%" cellspacing="0" cellpadding="8">
+              <tr><th align="left">Load</th><th>Avg Runtime</th><th>Avg Energy</th><th>Utilization</th></tr>
+              {%- for name, factor in factors.items() %}
+              {%- set ns = namespace(hours=0, kwh=0) %}
+              {%- for entry in valid %}
+              {%- set ns.hours = ns.hours + (entry.loads or {}).get(name, 0) %}
+              {%- set ns.kwh = ns.kwh + (entry.energy_kwh or {}).get(name, 0) %}
+              {%- endfor %}
+              {%- set days = valid | length %}
+              <tr><td align="left">{{ name }}</td><td>{{ (ns.hours / days) | round(1) }}h</td><td>{{ (ns.kwh / days) | round(1) }} kWh</td><td>{{ (factor * 100) | round(0) }}%</td></tr>
+              {%- endfor %}
+              </table>
+
+              *Avg per day over last {{ valid | length }} day(s) with surplus.*
+              {% endif %}
+            grid_options:
+              columns: 12
+
+          # Optional: Solar Production vs Export chart
+          # Requires daily solar production and grid export energy sensors
+          # Uncomment and replace entity IDs:
+          #
+          # - type: custom:apexcharts-card
+          #   header:
+          #     show: true
+          #     title: Solar Production vs Export (7d)
+          #     show_states: true
+          #     colorize_states: true
+          #   graph_span: 7d
+          #   span:
+          #     end: day
+          #   yaxis:
+          #     - id: kwh
+          #       min: ~0
+          #       apex_config:
+          #         title:
+          #           text: kWh
+          #   series:
+          #     - entity: YOUR_SOLAR_PRODUCTION_ENERGY_SENSOR  # ← daily solar kWh
+          #       name: Solar
+          #       type: column
+          #       color: "#ffc107"
+          #       yaxis_id: kwh
+          #       float_precision: 1
+          #       group_by:
+          #         func: max
+          #         duration: 1d
+          #       show:
+          #         in_header: raw
+          #     - entity: YOUR_GRID_EXPORT_ENERGY_SENSOR  # ← daily grid export kWh
+          #       name: Grid Export
+          #       type: column
+          #       color: "#8bc34a"
+          #       yaxis_id: kwh
+          #       float_precision: 1
+          #       group_by:
+          #         func: max
+          #         duration: 1d
+          #       show:
+          #         in_header: raw
+          #   grid_options:
+          #     columns: 12
+          #     rows: 3
