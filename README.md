@@ -108,6 +108,7 @@ A template dashboard is included in `dashboards/dashboard_template.yaml` with 3 
 | `YOUR_ACTUAL_SOLAR_SENSOR` | Today's actual solar production (resets at midnight) | `sensor.solax_inverter_today_s_solar_energy` |
 | `YOUR_CONSUMPTION_SENSOR` | Daily home consumption (resets at midnight) | `sensor.home_consumption_energy` |
 | `YOUR_GRID_EXPORT_POWER_SENSOR` | Real-time grid export power (W) | `sensor.solax_inverter_grid_export` |
+| `YOUR_PV_POWER_SENSOR` | Real-time PV production power (W) | `sensor.solax_inverter_pv_power_total` |
 
 **Optional placeholders** (remove the card if you don't have these):
 
@@ -117,6 +118,7 @@ A template dashboard is included in `dashboards/dashboard_template.yaml` with 3 
 | `YOUR_EXPENSIVE_PRICE_SENSOR` | Today's most expensive electricity price (gauge max indicator) |
 
 **Adjustments you may want to make:**
+- PV/Export gauge: adjust outer `max: 10000` to your peak PV power (W) and inner `max: 4500` to your grid export limit (W)
 - Battery gauge inner max: change `15` to your battery capacity in kWh
 - Price gauge range: adjust `min: -1` / `max: 8` for your electricity pricing
 - Price threshold annotation: adjust `y: 4` to your max charge price

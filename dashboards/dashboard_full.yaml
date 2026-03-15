@@ -1053,16 +1053,50 @@ views:
       # ── Col 1: Status & Controls ──────────────────────────────────────
       - type: grid
         cards:
-          - type: entities
-            title: Surplus Status
-            show_header_toggle: false
-            entities:
-              - entity: sensor.smart_energy_manager_surplus_load_status
-                name: Active Loads
-              - entity: sensor.solax_inverter_battery_capacity
-                name: Battery SOC
-              - entity: sensor.solax_inverter_grid_export
-                name: Grid Export (W)
+          - type: custom:gauge-card-pro
+            entity: sensor.solax_inverter_pv_power_total
+            entity2: sensor.solax_inverter_grid_export
+            needle: true
+            gradient: true
+            round: full
+            min: 0
+            max: 10000
+            titles:
+              primary: PV / Export
+              primary_font_size: 14px
+            inner:
+              min: 0
+              max: 4500
+              mode: severity
+              round: full
+              segments:
+                - from: 0
+                  color: '#8bc34a'
+                - from: 1000
+                  color: '#43a047'
+                - from: 2000
+                  color: '#fdd835'
+                - from: 3000
+                  color: '#fb8c00'
+                - from: 4000
+                  color: '#e53935'
+            setpoint:
+              value: 4500
+              color: '#e53935'
+              label: true
+            segments:
+              - from: 0
+                color: '#e0e0e0'
+              - from: 500
+                color: '#e53935'
+              - from: 2000
+                color: '#fb8c00'
+              - from: 4000
+                color: '#fdd835'
+              - from: 6000
+                color: '#8bc34a'
+              - from: 8000
+                color: '#43a047'
             grid_options:
               columns: 12
           - type: markdown
