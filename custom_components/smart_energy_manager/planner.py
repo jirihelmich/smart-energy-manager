@@ -493,6 +493,18 @@ class ChargingPlanner:
 
         solar_profile, _ = self._build_solar_profile(now)
 
+        # Scale remaining solar by today's live performance ratio.
+        # Include partial current hour (proportion elapsed) so the comparison
+        # is fair at any point within the hour.
+        live_scale = 1.0
+        minute_fraction = now.minute / 60.0
+        forecast_so_far = sum(
+            solar_profile.get((0, h), 0.0) for h in range(now.hour)
+        ) + solar_profile.get((0, now.hour), 0.0) * minute_fraction
+        actual_today = c.actual_solar_today
+        if forecast_so_far > 0.5 and actual_today is not None:
+            live_scale = min(actual_today / forecast_so_far, 1.5)
+
         hourly_surplus: dict[int, float] = {}
         battery_full_hour: int | None = None
         total_surplus = 0.0
@@ -500,8 +512,10 @@ class ChargingPlanner:
 
         # Simulate from now.hour through end of today
         for hour in range(now.hour, 24):
-            cons = self._hourly_consumption(hour, daily_consumption)
-            solar = solar_profile.get((0, hour), 0.0)
+            # For current hour, only count remaining fraction
+            hour_fraction = (1.0 - minute_fraction) if hour == now.hour else 1.0
+            cons = self._hourly_consumption(hour, daily_consumption) * hour_fraction
+            solar = solar_profile.get((0, hour), 0.0) * live_scale * hour_fraction
 
             net = solar - cons
             soc_kwh += net

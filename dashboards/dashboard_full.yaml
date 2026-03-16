@@ -1260,7 +1260,7 @@ views:
           - type: custom:apexcharts-card
             header:
               show: true
-              title: Grid Export Power
+              title: Solar & Export
               show_states: true
               colorize_states: true
             graph_span: 24h
@@ -1279,6 +1279,20 @@ views:
                   title:
                     text: kW
             series:
+              - entity: sensor.solax_inverter_pv_power_total
+                name: Solar
+                type: area
+                color: "#ffc107"
+                stroke_width: 1
+                opacity: 0.15
+                yaxis_id: power
+                group_by:
+                  func: avg
+                  duration: 15min
+                transform: "return x / 1000;"
+                show:
+                  in_header: raw
+                float_precision: 2
               - entity: sensor.solax_inverter_grid_export
                 name: Grid Export
                 type: area
@@ -1425,9 +1439,8 @@ views:
               {%- set days = valid | length %}
               <tr><td align="left">{{ name }}</td><td>{{ (ns.hours / days) | round(1) }}h</td><td>{{ (ns.kwh / days) | round(1) }} kWh</td><td>{{ (factor * 100) | round(0) }}%</td></tr>
               {%- endfor %}
+              <tr><td colspan="4" align="center"><small>Avg per day over last {{ valid | length }} day(s) with surplus.</small></td></tr>
               </table>
-
-              *Avg per day over last {{ valid | length }} day(s) with surplus.*
               {% endif %}
             grid_options:
               columns: 12
