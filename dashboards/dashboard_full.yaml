@@ -1224,89 +1224,73 @@ views:
               label: Now
             apex_config:
               chart:
-                height: 200px
-                stacked: true
+                height: 280px
               yaxis:
                 - title:
                     text: kW
                   decimalsInFloat: 1
                   min: 0
-            all_series_config:
-              type: area
-              stroke_width: 1
-              opacity: 0.4
-              group_by:
-                func: avg
-                duration: 5min
-              transform: "return x / 1000;"
-            series:
-              - entity: sensor.water_heater_power
-                name: Water Heater
-                color: "#ff6b6b"
-                unit: " kW"
-                float_precision: 2
-              - entity: sensor.power_meter_floor_heating_upstairs_power_2
-                name: Floor Upstairs
-                color: "#4ecdc4"
-                unit: " kW"
-                float_precision: 2
-              - entity: sensor.shelly3em63g3_b08184e0d6c0_energy_meter_2_power
-                name: Floor Downstairs
-                color: "#ffd93d"
-                unit: " kW"
-                float_precision: 2
-            grid_options:
-              columns: 12
-          - type: custom:apexcharts-card
-            header:
-              show: true
-              title: Solar & Export
-              show_states: true
-              colorize_states: true
-            graph_span: 24h
-            apex_config:
-              chart:
-                height: 180px
-            span:
-              start: day
-            now:
-              show: true
-              label: Now
-            yaxis:
-              - id: power
-                min: ~0
-                apex_config:
-                  title:
-                    text: kW
             series:
               - entity: sensor.solax_inverter_pv_power_total
                 name: Solar
                 type: area
                 color: "#ffc107"
                 stroke_width: 1
-                opacity: 0.15
-                yaxis_id: power
+                opacity: 0.12
+                unit: " kW"
+                float_precision: 2
                 group_by:
                   func: avg
-                  duration: 15min
+                  duration: 5min
                 transform: "return x / 1000;"
-                show:
-                  in_header: raw
-                float_precision: 2
               - entity: sensor.solax_inverter_grid_export
                 name: Grid Export
-                type: area
+                type: line
                 color: "#4caf50"
-                stroke_width: 1
-                opacity: 0.3
-                yaxis_id: power
+                stroke_width: 2
+                opacity: 1
+                unit: " kW"
+                float_precision: 2
                 group_by:
                   func: avg
-                  duration: 15min
+                  duration: 5min
                 transform: "return x / 1000;"
-                show:
-                  in_header: raw
+              - entity: sensor.water_heater_power
+                name: Water Heater
+                type: area
+                color: "#ff6b6b"
+                stroke_width: 1
+                opacity: 0.4
+                unit: " kW"
                 float_precision: 2
+                group_by:
+                  func: avg
+                  duration: 5min
+                transform: "return x / 1000;"
+              - entity: sensor.power_meter_floor_heating_upstairs_power_2
+                name: Floor Upstairs
+                type: area
+                color: "#4ecdc4"
+                stroke_width: 1
+                opacity: 0.4
+                unit: " kW"
+                float_precision: 2
+                group_by:
+                  func: avg
+                  duration: 5min
+                transform: "return x / 1000;"
+              - entity: sensor.shelly3em63g3_b08184e0d6c0_energy_meter_2_power
+                name: Floor Downstairs
+                type: area
+                color: "#ab47bc"
+                stroke_width: 1
+                opacity: 0.4
+                unit: " kW"
+                float_precision: 2
+                group_by:
+                  func: avg
+                  duration: 5min
+                transform: "return x / 1000;"
             grid_options:
               columns: 12
           - type: custom:apexcharts-card
