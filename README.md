@@ -4,7 +4,7 @@
 
 A Home Assistant custom integration for smart energy management of solar+battery systems. Automated night charging during cheapest electricity hours and surplus load management that activates loads when solar production exceeds consumption.
 
-**Inverter-agnostic** — supports Solax, GoodWe, SolarEdge, Huawei, Wattsonic GEN2, or any inverter with mode select entities in Home Assistant.
+**Inverter-agnostic** — supports Solax, SolarEdge, Huawei, Wattsonic GEN2, or any inverter with mode select entities in Home Assistant. GoodWe users: select "Custom" template and configure entities manually.
 
 ---
 
@@ -66,7 +66,7 @@ A Home Assistant custom integration for smart energy management of solar+battery
 The integration uses a multi-step config flow:
 
 1. **Name** — Instance name
-2. **Inverter Template** — Pick your inverter (Solax, GoodWe, SolarEdge, Huawei, Wattsonic, or Custom)
+2. **Inverter Template** — Pick your inverter (Solax, SolarEdge, Huawei, Wattsonic, or Custom)
 3. **Inverter Entities** — SOC sensor, capacity sensor, mode/charge entities
 4. **Inverter Values** — Mode option strings (pre-filled from template)
 5. **Price Sensor** — Spot electricity price sensor with hourly attributes
@@ -82,7 +82,7 @@ Configure via Settings > Devices > Smart Energy Manager > Configure > Surplus Lo
 - **Add/Edit/Remove loads** through the UI (no YAML editing)
 - **Reactive mode**: turns on when grid export exceeds margin, SOC above threshold
 - **Predictive mode**: runs on daily schedule, pre-evaluated against solar forecast
-- **Per-load settings**: power draw, priority, SOC thresholds, margins, switch interval, max outdoor temp
+- **Per-load settings**: power draw (kW the load consumes — used for surplus allocation, not a cutoff limit), priority, SOC thresholds, margins, switch interval, max outdoor temp
 
 ### Dashboard
 
@@ -270,11 +270,13 @@ A second floor heating zone (0.63 kW) via another Devireg thermostat, monitored 
 
 1. **Simple on/off loads** (smart plug, relay): use the switch entity directly
 2. **Thermostat-controlled loads**: create a template switch that sets temperature on turn_on and turns off on turn_off (see floor heating example)
-3. **Set priorities carefully**: lower number = higher priority. Water heater at 1 means it always gets surplus first
-4. **SOC thresholds**: use 90%+ for reactive loads (ensures battery is full before diverting). Solax inverters start exporting around 97-98% SOC
-5. **Anti-flap interval**: increase to 1800s+ on cloudy days to reduce relay switching. The default 300s can cause 10+ cycles/day with variable clouds
-6. **Outdoor temp gating**: set `max_outdoor_temp` for seasonal loads (heating) to avoid wasting energy in summer
-7. **Power sensors**: always configure if available — the integration uses actual power for energy tracking instead of the configured maximum
+3. **Mode-switching loads** (e.g. boiler eco → boost): create a template switch where `turn_on` activates the desired mode and `turn_off` returns to default. **Important**: the switch's `state` must report `on` when the load is actively consuming surplus, and `off` otherwise. The integration monitors the switch state every 2 minutes — if the state doesn't match what the integration expects, it will cycle on/off. Do NOT use an inverted switch
+4. **Power draw (kW)**: this tells the integration how much power the load consumes. It is NOT a cutoff limit — it's used to calculate how much surplus remains for lower-priority loads and to determine when to turn off (if remaining surplus drops below the load's consumption minus the off margin)
+5. **Set priorities carefully**: lower number = higher priority. Water heater at 1 means it always gets surplus first
+6. **SOC thresholds**: use 90%+ for reactive loads (ensures battery is full before diverting). Solax inverters start exporting around 97-98% SOC
+7. **Anti-flap interval**: increase to 1800s+ on cloudy days to reduce relay switching. The default 300s can cause 10+ cycles/day with variable clouds
+8. **Outdoor temp gating**: set `max_outdoor_temp` for seasonal loads (heating) to avoid wasting energy in summer
+9. **Power sensors**: always configure if available — the integration uses actual power for energy tracking instead of the configured maximum
 
 ## Architecture
 

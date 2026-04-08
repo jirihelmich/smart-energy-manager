@@ -72,7 +72,7 @@ Select your inverter brand to pre-fill mode strings and get entity hints:
 | Template | Integration | Notes |
 |----------|-------------|-------|
 | **Solax Modbus** | wills106/homeassistant-solax-modbus | Self Use / Manual Mode / Force Charge |
-| **GoodWe** | Core or mletenay | Uses operation mode entity for both mode and charge command |
+| **GoodWe** | Core or mletenay | Not yet available as template — use Custom and configure entities manually |
 | **SolarEdge Modbus** | binsentsu Modbus | Remote Control mode for force charge |
 | **Huawei Solar** | wlcrs | Time Of Use workaround |
 | **Custom / Other** | Any | Fill in all values manually |
