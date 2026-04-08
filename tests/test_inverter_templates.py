@@ -127,8 +127,8 @@ class TestInverterTemplates:
         assert result is INVERTER_TEMPLATES["custom"]
 
     def test_expected_template_count(self) -> None:
-        """We expect exactly 5 templates (3 select integrations + 1 EMS + custom)."""
-        assert len(INVERTER_TEMPLATES) == 5
+        """We expect exactly 6 templates (4 select integrations + 1 EMS + custom)."""
+        assert len(INVERTER_TEMPLATES) == 6
 
     def test_templates_are_frozen(self) -> None:
         """Templates should be immutable (frozen dataclass)."""

@@ -4,7 +4,7 @@
 
 A Home Assistant custom integration for smart energy management of solar+battery systems. Automated night charging during cheapest electricity hours and surplus load management that activates loads when solar production exceeds consumption.
 
-**Inverter-agnostic** — supports Solax, SolarEdge, Huawei, Wattsonic GEN2, or any inverter with mode select entities in Home Assistant. GoodWe users: select "Custom" template and configure entities manually.
+**Inverter-agnostic** — supports Solax, GoodWe, SolarEdge, Huawei, Wattsonic GEN2, or any inverter with mode select entities in Home Assistant.
 
 ---
 
@@ -66,7 +66,7 @@ A Home Assistant custom integration for smart energy management of solar+battery
 The integration uses a multi-step config flow:
 
 1. **Name** — Instance name
-2. **Inverter Template** — Pick your inverter (Solax, SolarEdge, Huawei, Wattsonic, or Custom)
+2. **Inverter Template** — Pick your inverter (Solax, GoodWe, SolarEdge, Huawei, Wattsonic, or Custom)
 3. **Inverter Entities** — SOC sensor, capacity sensor, mode/charge entities
 4. **Inverter Values** — Mode option strings (pre-filled from template)
 5. **Price Sensor** — Spot electricity price sensor with hourly attributes

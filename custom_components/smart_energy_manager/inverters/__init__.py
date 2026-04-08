@@ -15,6 +15,7 @@ from ..const import CONTROL_TYPE_EMS_POWER
 from ..models import InverterTemplate
 from .base import BaseInverterController, InverterCommandError, MODBUS_SETTLE_DELAY
 from .custom import TEMPLATE as _CUSTOM_TEMPLATE, CustomInverter
+from .goodwe import TEMPLATE as _GOODWE_TEMPLATE, GoodWeInverter
 from .huawei import TEMPLATE as _HUAWEI_TEMPLATE, HuaweiInverter
 from .solaredge import TEMPLATE as _SOLAREDGE_TEMPLATE, SolarEdgeInverter
 from .solax import TEMPLATE as _SOLAX_TEMPLATE, SolaxInverter
@@ -24,6 +25,7 @@ from .wattsonic import TEMPLATE as _WATTSONIC_TEMPLATE, WattsonicInverter
 
 INVERTER_TEMPLATES: dict[str, InverterTemplate] = {
     _SOLAX_TEMPLATE.id: _SOLAX_TEMPLATE,
+    _GOODWE_TEMPLATE.id: _GOODWE_TEMPLATE,
     _SOLAREDGE_TEMPLATE.id: _SOLAREDGE_TEMPLATE,
     _HUAWEI_TEMPLATE.id: _HUAWEI_TEMPLATE,
     _WATTSONIC_TEMPLATE.id: _WATTSONIC_TEMPLATE,
@@ -34,6 +36,7 @@ INVERTER_TEMPLATES: dict[str, InverterTemplate] = {
 
 _CONTROLLER_REGISTRY: dict[str, type[BaseInverterController]] = {
     _SOLAX_TEMPLATE.id: SolaxInverter,
+    _GOODWE_TEMPLATE.id: GoodWeInverter,
     _SOLAREDGE_TEMPLATE.id: SolarEdgeInverter,
     _HUAWEI_TEMPLATE.id: HuaweiInverter,
     _WATTSONIC_TEMPLATE.id: WattsonicInverter,
@@ -76,6 +79,7 @@ __all__ = [
     "create_inverter_controller",
     "get_template",
     "CustomInverter",
+    "GoodWeInverter",
     "HuaweiInverter",
     "SolaxInverter",
     "SolarEdgeInverter",
