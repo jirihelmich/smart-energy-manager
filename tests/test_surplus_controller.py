@@ -261,11 +261,12 @@ class TestSurplusTick:
         hass.services.async_call.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_turn_off_when_soc_below_off_threshold(self):
-        """Turn off when SOC drops below off threshold (after 3 ticks)."""
-        # SOC 90% < off threshold 95% → should turn off
-        hass = _make_hass(grid_export_kw=0.0, switch_states={"switch.water_heater": "on"})
-        coord = _make_coordinator(soc=90.0, surplus_loads=[WATER_HEATER_LOAD])
+    async def test_turn_off_when_importing_from_grid(self):
+        """Turn off when importing from grid beyond margin (after 3 ticks)."""
+        # Grid export -1.5 kW (importing), margin_off = 0.5
+        # -1.5 < -0.5 → should turn off
+        hass = _make_hass(grid_export_kw=-1.5, switch_states={"switch.water_heater": "on"})
+        coord = _make_coordinator(soc=99.0, surplus_loads=[WATER_HEATER_LOAD])
         ctrl = SurplusLoadController(hass, coord)
         ctrl.load_configs()
 
