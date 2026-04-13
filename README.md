@@ -276,7 +276,34 @@ A second floor heating zone (0.63 kW) via another Devireg thermostat, monitored 
 6. **SOC thresholds**: use 90%+ for reactive loads (ensures battery is full before diverting). Solax inverters start exporting around 97-98% SOC
 7. **Anti-flap interval**: increase to 1800s+ on cloudy days to reduce relay switching. The default 300s can cause 10+ cycles/day with variable clouds
 8. **Outdoor temp gating**: set `max_outdoor_temp` for seasonal loads (heating) to avoid wasting energy in summer
-9. **Power sensors**: always configure if available — the integration uses actual power for energy tracking instead of the configured maximum
+9. **Power sensors**: always configure if available — the integration uses actual power for energy tracking instead of the configured maximum. Power sensor is optional — you can leave it blank or clear it when editing a load
+
+### Troubleshooting: Why Isn't My Load Turning On?
+
+Each surplus load reports a **reason** explaining why it is currently on or off. To check:
+
+1. Go to **Developer Tools → States**
+2. Search for `sensor.smart_energy_manager_surplus_load_status`
+3. Expand **Attributes** → find `load_details`
+4. Find your load by name — the `reason` field explains the current state
+
+Common reasons:
+
+| Reason | Meaning |
+|--------|---------|
+| `Waiting: SOC 85% < 90%` | Battery not full enough — lower the SOC ON threshold or wait |
+| `Waiting: surplus 0.15 kW < 0.30 kW margin` | Not enough grid export yet — lower margin_on or wait for more solar |
+| `Blocked: outdoor temp too high` | Outdoor temperature exceeds the load's max_outdoor_temp setting |
+| `ON: surplus 2.50 kW, SOC 100%` | Load is running — conditions are met |
+| `OFF: Surplus 0.10 kW too low` | Surplus dropped, load was turned off |
+| `Running — surplus OK` | Load is running and conditions are still good |
+| `Negative price — forced ON` | Spot price is ≤ 0, load forced on to absorb energy |
+
+**Still not working?** Check:
+- Is the **switch entity** correct? The integration calls `switch.turn_on` / `switch.turn_off` on the configured entity
+- Does the switch **report state correctly**? After `turn_on`, the switch must show `on` in HA. If it stays `off`, the integration thinks it failed and won't track it
+- Is the load's **auto mode** enabled? Check `switch.<load>_automatic_watering` or equivalent
+- Check HA logs: **Settings → System → Logs**, filter for `smart_energy_manager`
 
 ## Architecture
 
