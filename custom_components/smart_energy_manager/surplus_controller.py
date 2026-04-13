@@ -637,10 +637,14 @@ class SurplusLoadController:
 
             if st.is_running:
                 # Already running — should we turn OFF?
+                # The battery absorbs short-term deficits, so we only turn off when:
+                # 1. Temperature blocked, or
+                # 2. SOC dropped below the off threshold (battery draining too much)
+                # We do NOT turn off just because grid_export is 0 — the load may be
+                # consuming solar directly while battery holds steady.
                 should_off = (
                     temp_blocked
                     or soc < cfg.battery_off_threshold
-                    or available_surplus < cfg.power_kw - cfg.margin_off_kw
                 )
                 if should_off:
                     if temp_blocked:
@@ -648,7 +652,7 @@ class SurplusLoadController:
                     elif soc < cfg.battery_off_threshold:
                         reason = f"SOC {soc:.0f}% < {cfg.battery_off_threshold:.0f}%"
                     else:
-                        reason = f"Surplus {available_surplus:.2f} kW too low"
+                        reason = f"SOC {soc:.0f}% < {cfg.battery_off_threshold:.0f}%"
                     st.consecutive_off_ticks += 1
                     # Require 3 consecutive ticks (~6 min) before turning off
                     # to ride through brief clouds
