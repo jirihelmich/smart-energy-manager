@@ -178,6 +178,7 @@ class SurplusLoadState:
     predictive_aborted: bool = False  # True if mid-run abort happened today
     predictive_notified: bool = False  # True after ON notification sent for this schedule
     last_notified_on: bool | None = None  # Last notification state (None=never notified)
+    last_reason: str = ""  # Why the load is on/off (for diagnostics)
 
 
 @dataclass(frozen=True)

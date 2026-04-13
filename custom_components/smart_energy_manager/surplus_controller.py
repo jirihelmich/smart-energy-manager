@@ -19,12 +19,14 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_GRID_EXPORT_POWER_SENSOR,
     CONF_HOUSE_CONSUMPTION_POWER_SENSOR,
+    CONF_NEGATIVE_PRICE_ABSORB,
     CONF_NOTIFY_SURPLUS_LOAD,
     CONF_OUTDOOR_TEMP_SENSOR,
     CONF_PROACTIVE_SOC_THRESHOLD,
     CONF_PV_POWER_SENSOR,
     CONF_SURPLUS_LOADS,
     DEFAULT_MAX_OUTDOOR_TEMP,
+    DEFAULT_NEGATIVE_PRICE_ABSORB,
     DEFAULT_PROACTIVE_SOC_THRESHOLD,
     DEFAULT_PREDICTIVE_LEAD_MINUTES,
     DEFAULT_PREDICTIVE_SCHEDULE_END,
@@ -340,6 +342,19 @@ class SurplusLoadController:
         base_consumption = max(0.0, consumption - running_power)
         return pv - base_consumption
 
+    def _get_spot_price(self) -> float | None:
+        """Get current spot electricity price in CZK/kWh."""
+        return self._coordinator.current_price
+
+    def _is_negative_price_absorb(self) -> bool:
+        """Check if negative price absorption is enabled and price is <= 0."""
+        if not self._coordinator._opt(CONF_NEGATIVE_PRICE_ABSORB, DEFAULT_NEGATIVE_PRICE_ABSORB):
+            return False
+        price = self._get_spot_price()
+        if price is None:
+            return False
+        return price <= 0
+
     def _compute_true_surplus(self, grid_export_kw: float) -> float:
         """Compute true surplus by adding back running loads' consumption.
 
@@ -600,12 +615,25 @@ class SurplusLoadController:
         # Remaining surplus available for allocation
         available_surplus = true_surplus
 
+        # Negative price absorption: force all loads ON to avoid exporting at a loss
+        negative_absorb = self._is_negative_price_absorb()
+        if negative_absorb:
+            _LOGGER.info("Negative spot price — forcing all reactive loads ON to absorb energy")
+
         # Phase 1: Decide what should be ON/OFF (reactive loads only)
         desired: dict[str, bool] = {}
         for cfg in reactive_configs:  # sorted by priority (low first)
             st = self._states[cfg.id]
 
             temp_blocked = self._is_temp_blocked(cfg)
+
+            # During negative prices: force ON (skip SOC/surplus checks)
+            if negative_absorb and not temp_blocked:
+                desired[cfg.switch_entity] = True
+                st.consecutive_off_ticks = 0
+                st.last_reason = "Negative price — forced ON"
+                available_surplus -= cfg.power_kw
+                continue
 
             if st.is_running:
                 # Already running — should we turn OFF?
@@ -615,11 +643,18 @@ class SurplusLoadController:
                     or available_surplus < cfg.power_kw - cfg.margin_off_kw
                 )
                 if should_off:
+                    if temp_blocked:
+                        reason = "Outdoor temp too high"
+                    elif soc < cfg.battery_off_threshold:
+                        reason = f"SOC {soc:.0f}% < {cfg.battery_off_threshold:.0f}%"
+                    else:
+                        reason = f"Surplus {available_surplus:.2f} kW too low"
                     st.consecutive_off_ticks += 1
                     # Require 3 consecutive ticks (~6 min) before turning off
                     # to ride through brief clouds
                     if st.consecutive_off_ticks >= 3:
                         desired[cfg.switch_entity] = False
+                        st.last_reason = f"OFF: {reason}"
                     else:
                         _LOGGER.info(
                             "Turn-off delayed %s: %d/3 ticks",
@@ -630,25 +665,29 @@ class SurplusLoadController:
                 else:
                     st.consecutive_off_ticks = 0
                     desired[cfg.switch_entity] = True
+                    st.last_reason = "Running — surplus OK"
                     available_surplus -= cfg.power_kw
             else:
                 # Not running — should we turn ON?
-                # Turn on when SOC is above threshold and surplus covers the margin.
-                # The battery absorbs any short-term deficit between surplus and load power.
                 should_on = (
                     not temp_blocked
                     and soc >= cfg.battery_on_threshold
                     and available_surplus >= cfg.margin_on_kw
                 )
                 if not should_on:
+                    if temp_blocked:
+                        st.last_reason = "Blocked: outdoor temp too high"
+                    elif soc < cfg.battery_on_threshold:
+                        st.last_reason = f"Waiting: SOC {soc:.0f}% < {cfg.battery_on_threshold:.0f}%"
+                    else:
+                        st.last_reason = f"Waiting: surplus {available_surplus:.2f} kW < {cfg.margin_on_kw:.2f} kW margin"
                     _LOGGER.info(
-                        "Reactive skip %s: temp_blocked=%s, soc=%.0f (need %.0f), "
-                        "surplus=%.2f (need %.2f)",
-                        cfg.name, temp_blocked, soc, cfg.battery_on_threshold,
-                        available_surplus, cfg.margin_on_kw,
+                        "Reactive skip %s: %s",
+                        cfg.name, st.last_reason,
                     )
                 if should_on:
                     desired[cfg.switch_entity] = True
+                    st.last_reason = f"ON: surplus {available_surplus:.2f} kW, SOC {soc:.0f}%"
                     available_surplus -= cfg.power_kw
                 else:
                     desired[cfg.switch_entity] = False
@@ -792,6 +831,7 @@ class SurplusLoadController:
                 "runtime_today_h": round(st.daily_runtime_seconds / 3600, 2),
                 "energy_today_kwh": round(st.daily_energy_kwh, 2),
                 "mode": cfg.mode,
+                "reason": st.last_reason,
             }
             if cfg.mode == SURPLUS_MODE_PREDICTIVE:
                 detail["schedule"] = f"{cfg.schedule_start_hour:02d}:00-{cfg.schedule_end_hour:02d}:00"

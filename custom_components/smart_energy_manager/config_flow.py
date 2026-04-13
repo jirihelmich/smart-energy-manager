@@ -60,6 +60,7 @@ from .const import (
     CONF_NOTIFY_SENSOR_UNAVAILABLE,
     CONF_NOTIFY_SURPLUS_LOAD,
     CONF_PRICE_ATTRIBUTE_FORMAT,
+    CONF_NEGATIVE_PRICE_ABSORB,
     CONF_PROACTIVE_SOC_THRESHOLD,
     CONF_PV_POWER_SENSOR,
     CONF_PRICE_SENSOR,
@@ -92,6 +93,7 @@ from .const import (
     DEFAULT_NOTIFY_SENSOR_UNAVAILABLE,
     DEFAULT_NOTIFY_SURPLUS_LOAD,
     DEFAULT_PRICE_ATTRIBUTE_FORMAT,
+    DEFAULT_NEGATIVE_PRICE_ABSORB,
     DEFAULT_PROACTIVE_SOC_THRESHOLD,
     DEFAULT_SURPLUS_BATTERY_OFF,
     DEFAULT_SURPLUS_BATTERY_ON,
@@ -590,6 +592,10 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                         default=current.get(CONF_PROACTIVE_SOC_THRESHOLD, DEFAULT_PROACTIVE_SOC_THRESHOLD),
                     ): vol.All(vol.Coerce(float), vol.Range(min=50, max=100)),
                     vol.Optional(
+                        CONF_NEGATIVE_PRICE_ABSORB,
+                        default=current.get(CONF_NEGATIVE_PRICE_ABSORB, DEFAULT_NEGATIVE_PRICE_ABSORB),
+                    ): bool,
+                    vol.Optional(
                         CONF_OUTDOOR_TEMP_SENSOR,
                         default=current.get(CONF_OUTDOOR_TEMP_SENSOR, ""),
                     ): _entity_selector("sensor"),
@@ -696,27 +702,37 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Add a new surplus load — basic config."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._pending_load = {
-                "id": str(uuid.uuid4()),
-                "name": user_input["name"],
-                "switch_entity": user_input["switch_entity"],
-                "power_kw": user_input["power_kw"],
-                "power_sensor": user_input.get("power_sensor", ""),
-                "priority": user_input.get("priority", len(self._get_surplus_loads()) + 1),
-                "mode": user_input.get("mode", SURPLUS_MODE_REACTIVE),
-                "battery_on_threshold": user_input.get("battery_on_threshold", DEFAULT_SURPLUS_BATTERY_ON),
-                "battery_off_threshold": user_input.get("battery_off_threshold", DEFAULT_SURPLUS_BATTERY_OFF),
-                "margin_on_kw": user_input.get("margin_on_kw", DEFAULT_SURPLUS_MARGIN_ON),
-                "margin_off_kw": user_input.get("margin_off_kw", DEFAULT_SURPLUS_MARGIN_OFF),
-                "min_switch_interval": user_input.get("min_switch_interval", DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL),
-                "max_outdoor_temp": user_input.get("max_outdoor_temp", DEFAULT_MAX_OUTDOOR_TEMP),
-            }
-            # If predictive mode, show schedule step
-            if self._pending_load["mode"] == SURPLUS_MODE_PREDICTIVE:
-                return await self.async_step_surplus_add_predictive()
-            # Reactive mode — save immediately
-            return self._save_pending_load()
+            # Check for duplicate name + mode
+            existing = self._get_surplus_loads()
+            new_name = user_input["name"]
+            new_mode = user_input.get("mode", SURPLUS_MODE_REACTIVE)
+            for ex in existing:
+                if ex["name"] == new_name and ex.get("mode", SURPLUS_MODE_REACTIVE) == new_mode:
+                    errors["name"] = "duplicate_load_name"
+                    break
+            if not errors:
+                self._pending_load = {
+                    "id": str(uuid.uuid4()),
+                    "name": user_input["name"],
+                    "switch_entity": user_input["switch_entity"],
+                    "power_kw": user_input["power_kw"],
+                    "power_sensor": user_input.get("power_sensor", ""),
+                    "priority": user_input.get("priority", len(self._get_surplus_loads()) + 1),
+                    "mode": user_input.get("mode", SURPLUS_MODE_REACTIVE),
+                    "battery_on_threshold": user_input.get("battery_on_threshold", DEFAULT_SURPLUS_BATTERY_ON),
+                    "battery_off_threshold": user_input.get("battery_off_threshold", DEFAULT_SURPLUS_BATTERY_OFF),
+                    "margin_on_kw": user_input.get("margin_on_kw", DEFAULT_SURPLUS_MARGIN_ON),
+                    "margin_off_kw": user_input.get("margin_off_kw", DEFAULT_SURPLUS_MARGIN_OFF),
+                    "min_switch_interval": user_input.get("min_switch_interval", DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL),
+                    "max_outdoor_temp": user_input.get("max_outdoor_temp", DEFAULT_MAX_OUTDOOR_TEMP),
+                }
+                # If predictive mode, show schedule step
+                if self._pending_load["mode"] == SURPLUS_MODE_PREDICTIVE:
+                    return await self.async_step_surplus_add_predictive()
+                # Reactive mode — save immediately
+                return self._save_pending_load()
 
         loads = self._get_surplus_loads()
         next_priority = len(loads) + 1
@@ -757,6 +773,7 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                     ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=50.0)),
                 }
             ),
+            errors=errors,
         )
 
     async def async_step_surplus_add_predictive(
@@ -909,7 +926,10 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                     vol.Required("power_kw", default=ld.get("power_kw", 1.0)): vol.All(
                         vol.Coerce(float), vol.Range(min=0.1, max=50.0)
                     ),
-                    vol.Optional("power_sensor", default=ld.get("power_sensor", "")): _entity_selector("sensor"),
+                    vol.Optional(
+                        "power_sensor",
+                        description={"suggested_value": ld.get("power_sensor") or vol.UNDEFINED},
+                    ): _entity_selector("sensor"),
                     vol.Optional("priority", default=ld.get("priority", 1)): vol.All(
                         vol.Coerce(int), vol.Range(min=1, max=10)
                     ),

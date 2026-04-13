@@ -125,6 +125,7 @@
           "pv_power_sensor": "PV power sensor (instantaneous solar production kW/W)",
           "house_consumption_power_sensor": "House consumption power sensor (instantaneous kW/W)",
           "proactive_soc_threshold": "Proactive SOC threshold (%) — start loads before actual export",
+          "negative_price_absorb": "Force loads ON during negative spot prices (avoid exporting at a loss)",
           "outdoor_temp_sensor": "Outdoor temperature sensor (for seasonal load control)",
           "charging_efficiency": "Charging efficiency (0.7-1.0)",
           "evening_consumption_multiplier": "Evening consumption multiplier",
@@ -221,7 +222,8 @@
       }
     },
     "error": {
-      "min_soc_exceeds_max": "Min SOC must be less than Max Charge Level"
+      "min_soc_exceeds_max": "Min SOC must be less than Max Charge Level",
+      "duplicate_load_name": "A load with this name and mode already exists"
     }
   },
   "entity": {
