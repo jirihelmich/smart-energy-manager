@@ -82,6 +82,10 @@ def _make_hass(
             s.state = str(grid_export_kw)
             s.attributes = {"unit_of_measurement": grid_uom}
             return s
+        if entity_id == "sun.sun":
+            s = MagicMock()
+            s.state = "above_horizon"
+            return s
         if entity_id in switch_states:
             s = MagicMock()
             s.state = switch_states[entity_id]

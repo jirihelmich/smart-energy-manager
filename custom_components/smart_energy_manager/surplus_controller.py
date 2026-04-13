@@ -615,6 +615,10 @@ class SurplusLoadController:
         # Remaining surplus available for allocation
         available_surplus = true_surplus
 
+        # Sun check: no reactive loads after sunset / before sunrise
+        sun_state = self._hass.states.get("sun.sun")
+        sun_is_up = sun_state is not None and sun_state.state == "above_horizon"
+
         # Negative price absorption: force all loads ON to avoid exporting at a loss
         negative_absorb = self._is_negative_price_absorb()
         if negative_absorb:
@@ -626,6 +630,17 @@ class SurplusLoadController:
             st = self._states[cfg.id]
 
             temp_blocked = self._is_temp_blocked(cfg)
+
+            # After sunset: force all reactive loads OFF
+            if not sun_is_up and not negative_absorb:
+                if st.is_running:
+                    desired[cfg.switch_entity] = False
+                    st.last_reason = "OFF: sun below horizon"
+                    st.consecutive_off_ticks = 0
+                else:
+                    desired[cfg.switch_entity] = False
+                    st.last_reason = "Waiting: sun below horizon"
+                continue
 
             # During negative prices: force ON (skip SOC/surplus checks)
             if negative_absorb and not temp_blocked:
