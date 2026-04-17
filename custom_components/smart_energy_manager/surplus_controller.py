@@ -652,22 +652,23 @@ class SurplusLoadController:
 
             if st.is_running:
                 # Already running — should we turn OFF?
-                # Use grid_export directly (not true_surplus) to avoid circular logic
-                # where the load's own consumption inflates the surplus figure.
-                # grid_export < -margin_off means we're importing beyond the margin,
-                # i.e. the load is draining the battery, not consuming solar surplus.
+                # Turn off if: temp blocked, SOC too low, importing from grid,
+                # or PV production is less than the load's consumption (battery draining).
+                pv_power = self._get_pv_power()
+                pv_covers_load = pv_power is None or pv_power >= cfg.power_kw - cfg.margin_off_kw
                 should_off = (
                     temp_blocked
                     or soc < cfg.battery_off_threshold
                     or grid_export < -cfg.margin_off_kw
+                    or not pv_covers_load
                 )
                 if should_off:
                     if temp_blocked:
                         reason = "Outdoor temp too high"
                     elif soc < cfg.battery_off_threshold:
                         reason = f"SOC {soc:.0f}% < {cfg.battery_off_threshold:.0f}%"
-                    elif soc < cfg.battery_off_threshold:
-                        reason = f"SOC {soc:.0f}% < {cfg.battery_off_threshold:.0f}%"
+                    elif not pv_covers_load:
+                        reason = f"PV {pv_power:.2f} kW < load ({cfg.power_kw:.2f} kW)"
                     else:
                         reason = f"Importing {-grid_export:.2f} kW from grid"
                     st.consecutive_off_ticks += 1
@@ -690,16 +691,23 @@ class SurplusLoadController:
                     available_surplus -= cfg.power_kw
             else:
                 # Not running — should we turn ON?
+                # Also require real solar production (PV > load power) to avoid
+                # turning on from battery-sourced "surplus" (inverter exporting battery)
+                pv_power = self._get_pv_power()
+                pv_sufficient = pv_power is None or pv_power >= cfg.power_kw
                 should_on = (
                     not temp_blocked
                     and soc >= cfg.battery_on_threshold
                     and available_surplus >= cfg.margin_on_kw
+                    and pv_sufficient
                 )
                 if not should_on:
                     if temp_blocked:
                         st.last_reason = "Blocked: outdoor temp too high"
                     elif soc < cfg.battery_on_threshold:
                         st.last_reason = f"Waiting: SOC {soc:.0f}% < {cfg.battery_on_threshold:.0f}%"
+                    elif not pv_sufficient:
+                        st.last_reason = f"Waiting: PV {pv_power:.2f} kW < {cfg.power_kw:.2f} kW (battery-sourced export)"
                     else:
                         st.last_reason = f"Waiting: surplus {available_surplus:.2f} kW < {cfg.margin_on_kw:.2f} kW margin"
                     _LOGGER.info(
