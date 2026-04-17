@@ -68,12 +68,16 @@
         }
       },
       "analytics": {
-        "title": "Analytics Sensors (Optional)",
-        "description": "Select sensors for self-consumption and grid analytics. Leave empty to skip.",
+        "title": "Power Sensors & Analytics",
+        "description": "Select real-time power sensors for surplus load management (recommended) and daily energy sensors for analytics. All optional — leave empty to skip.",
         "data": {
           "grid_import_sensor": "Daily grid import sensor (kWh, resets at midnight)",
           "grid_export_sensor": "Daily grid export sensor (kWh, resets at midnight)",
-          "daily_solar_sensor": "Daily solar production sensor (kWh, resets at midnight)"
+          "daily_solar_sensor": "Daily solar production sensor (kWh, resets at midnight)",
+          "grid_export_power_sensor": "Grid export power sensor (W/kW, real-time, negative = exporting)",
+          "pv_power_sensor": "PV power sensor (W/kW, real-time solar production)",
+          "house_consumption_power_sensor": "House consumption power sensor (W/kW, real-time load)",
+          "outdoor_temp_sensor": "Outdoor temperature sensor (for seasonal load control, e.g. floor heating)"
         }
       },
       "settings": {

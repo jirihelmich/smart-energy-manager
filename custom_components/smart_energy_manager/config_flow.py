@@ -378,7 +378,7 @@ class SmartBatteryChargingConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_analytics(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Step 7b: Optional analytics sensors (grid import/export/solar)."""
+        """Step 7b: Optional analytics + real-time power sensors for surplus control."""
         if user_input is not None:
             self._data.update(user_input)
             return await self.async_step_settings()
@@ -387,9 +387,16 @@ class SmartBatteryChargingConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="analytics",
             data_schema=vol.Schema(
                 {
+                    # Daily energy (kWh) — for analytics/dashboard
                     vol.Optional(CONF_GRID_IMPORT_SENSOR): _entity_selector("sensor"),
                     vol.Optional(CONF_GRID_EXPORT_SENSOR): _entity_selector("sensor"),
                     vol.Optional(CONF_DAILY_SOLAR_SENSOR): _entity_selector("sensor"),
+                    # Real-time power (W/kW) — required for surplus load management
+                    vol.Optional(CONF_GRID_EXPORT_POWER_SENSOR): _entity_selector("sensor"),
+                    vol.Optional(CONF_PV_POWER_SENSOR): _entity_selector("sensor"),
+                    vol.Optional(CONF_HOUSE_CONSUMPTION_POWER_SENSOR): _entity_selector("sensor"),
+                    # Outdoor temperature (for seasonal load control, e.g. floor heating)
+                    vol.Optional(CONF_OUTDOOR_TEMP_SENSOR): _entity_selector("sensor"),
                 }
             ),
         )
@@ -565,27 +572,27 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                     # Analytics sensors (optional)
                     vol.Optional(
                         CONF_GRID_IMPORT_SENSOR,
-                        default=current.get(CONF_GRID_IMPORT_SENSOR, ""),
+                        description={"suggested_value": current.get(CONF_GRID_IMPORT_SENSOR) or vol.UNDEFINED},
                     ): _entity_selector("sensor"),
                     vol.Optional(
                         CONF_GRID_EXPORT_SENSOR,
-                        default=current.get(CONF_GRID_EXPORT_SENSOR, ""),
+                        description={"suggested_value": current.get(CONF_GRID_EXPORT_SENSOR) or vol.UNDEFINED},
                     ): _entity_selector("sensor"),
                     vol.Optional(
                         CONF_DAILY_SOLAR_SENSOR,
-                        default=current.get(CONF_DAILY_SOLAR_SENSOR, ""),
+                        description={"suggested_value": current.get(CONF_DAILY_SOLAR_SENSOR) or vol.UNDEFINED},
                     ): _entity_selector("sensor"),
                     vol.Optional(
                         CONF_GRID_EXPORT_POWER_SENSOR,
-                        default=current.get(CONF_GRID_EXPORT_POWER_SENSOR, ""),
+                        description={"suggested_value": current.get(CONF_GRID_EXPORT_POWER_SENSOR) or vol.UNDEFINED},
                     ): _entity_selector("sensor"),
                     vol.Optional(
                         CONF_PV_POWER_SENSOR,
-                        default=current.get(CONF_PV_POWER_SENSOR, ""),
+                        description={"suggested_value": current.get(CONF_PV_POWER_SENSOR) or vol.UNDEFINED},
                     ): _entity_selector("sensor"),
                     vol.Optional(
                         CONF_HOUSE_CONSUMPTION_POWER_SENSOR,
-                        default=current.get(CONF_HOUSE_CONSUMPTION_POWER_SENSOR, ""),
+                        description={"suggested_value": current.get(CONF_HOUSE_CONSUMPTION_POWER_SENSOR) or vol.UNDEFINED},
                     ): _entity_selector("sensor"),
                     vol.Optional(
                         CONF_PROACTIVE_SOC_THRESHOLD,
@@ -597,7 +604,7 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                     ): bool,
                     vol.Optional(
                         CONF_OUTDOOR_TEMP_SENSOR,
-                        default=current.get(CONF_OUTDOOR_TEMP_SENSOR, ""),
+                        description={"suggested_value": current.get(CONF_OUTDOOR_TEMP_SENSOR) or vol.UNDEFINED},
                     ): _entity_selector("sensor"),
                     # Advanced: Efficiency & Consumption Profiles
                     vol.Optional(
