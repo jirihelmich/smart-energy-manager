@@ -722,6 +722,8 @@ class SurplusLoadController:
                     desired[cfg.switch_entity] = False
 
         # Phase 2: Update each load's desire (is_running) with anti-flap
+        # Safety override: bypass anti-flap after sunset (no real surplus possible)
+        anti_flap_bypass = not sun_is_up and not negative_absorb
         for cfg in reactive_configs:
             st = self._states[cfg.id]
             want_on = desired.get(cfg.switch_entity, False)
@@ -732,7 +734,8 @@ class SurplusLoadController:
                 continue
 
             # Anti-flap: protect relay from rapid switching
-            if st.last_switch_time > 0:
+            # Bypassed for safety when sun is below horizon (force turn-off)
+            if not anti_flap_bypass and st.last_switch_time > 0:
                 elapsed = monotonic_now - st.last_switch_time
                 if 0 < elapsed < cfg.min_switch_interval:
                     _LOGGER.info(
