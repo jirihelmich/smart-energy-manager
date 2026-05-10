@@ -600,8 +600,11 @@ class ChargingPlanner:
             soc_kwh += solar - cons
 
             # Predictive load drains battery during its schedule
+            # Scale by historical utilization to avoid worst-case-only behavior
+            # (thermostat-controlled loads rarely run at full power for full schedule)
             if sched_start <= hour < sched_end:
-                soc_kwh -= load.power_kw * hour_fraction
+                load_factor = (utilization_factors or {}).get(load.name, 1.0)
+                soc_kwh -= load.power_kw * hour_fraction * load_factor
 
             # Battery overflow = surplus available for reactive loads
             if soc_kwh > max_soc_kwh:
